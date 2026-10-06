@@ -46,8 +46,7 @@ The WebUI and SHARPA scripts retain the fail-recovery layout used by the dissert
 datasets/
   failrecovery/
     manifest.jsonl
-    failrecovery/
-    ...
+    <episode files/directories...>
 ```
 
 Manifest entries use the exported fields `camera_video_paths`, `synchronized_frames_path`, `tactile_events_path`, and `tactile_stream_paths`.

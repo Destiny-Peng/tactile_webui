@@ -21,15 +21,15 @@ TRANSITIONAL_DATA="$SOURCE_ROOT/datasets/lf3r_failure_rollouts"
 CANONICAL_DATA="$SOURCE_ROOT/datasets/failrecovery"
 
 if [[ -f "$LEGACY_DATA/failrecovery_manifest.jsonl" ]]; then
-  SOURCE_DATA="$LEGACY_DATA"
+  SOURCE_EPISODES="$LEGACY_DATA/failrecovery"
   SOURCE_MANIFEST="$LEGACY_DATA/failrecovery_manifest.jsonl"
-  SOURCE_PREFIX="datasets/lf3r_failure_rollouts/v1/"
+  SOURCE_PREFIX="datasets/lf3r_failure_rollouts/v1/failrecovery/"
 elif [[ -f "$TRANSITIONAL_DATA/failrecovery_manifest.jsonl" ]]; then
-  SOURCE_DATA="$TRANSITIONAL_DATA"
+  SOURCE_EPISODES="$TRANSITIONAL_DATA/failrecovery"
   SOURCE_MANIFEST="$TRANSITIONAL_DATA/failrecovery_manifest.jsonl"
-  SOURCE_PREFIX="datasets/lf3r_failure_rollouts/"
+  SOURCE_PREFIX="datasets/lf3r_failure_rollouts/failrecovery/"
 elif [[ -f "$CANONICAL_DATA/manifest.jsonl" ]]; then
-  SOURCE_DATA="$CANONICAL_DATA"
+  SOURCE_EPISODES="$CANONICAL_DATA"
   SOURCE_MANIFEST="$CANONICAL_DATA/manifest.jsonl"
   SOURCE_PREFIX="datasets/failrecovery/"
 else
@@ -40,8 +40,8 @@ TARGET_DATA="$TARGET_ROOT/datasets/failrecovery"
 mkdir -p "$TARGET_DATA"
 
 note "copying fail-recovery dataset"
-[[ -d "$SOURCE_DATA/failrecovery" ]] || fail "missing episode directory: $SOURCE_DATA/failrecovery"
-rsync -a --info=stats2 "$SOURCE_DATA/failrecovery/" "$TARGET_DATA/failrecovery/"
+[[ -d "$SOURCE_EPISODES" ]] || fail "missing episode directory: $SOURCE_EPISODES"
+rsync -a --info=stats2 --exclude 'manifest.jsonl' "$SOURCE_EPISODES/" "$TARGET_DATA/"
 
 note "rewriting dataset-local manifest"
 python3 - "$SOURCE_MANIFEST" "$TARGET_DATA/manifest.jsonl" "$SOURCE_PREFIX" <<'PY'
@@ -210,7 +210,7 @@ rm -rf "$TARGET_ROOT/annotations/failure_annotations"
 note "migration complete"
 printf '\nStandalone layout:\n'
 printf '  datasets/failrecovery/manifest.jsonl\n'
-printf '  datasets/failrecovery/failrecovery/\n'
+printf '  datasets/failrecovery/<episode files/directories...>\n'
 printf '  annotations/failrecovery/records/\n'
 printf '  annotations/failrecovery/events/\n'
 printf '  outputs/usb_event_intervals/\n'

@@ -79,6 +79,62 @@ class WorkspaceAnnotationTest(unittest.TestCase):
         self.assertIn("usb_external", app.rollout_map())
 
 
+    def test_symlinked_manifest_infers_original_project_root(self):
+        temporary, app = self.make_app()
+        self.addCleanup(temporary.cleanup)
+        external_temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(external_temporary.cleanup)
+        external = Path(external_temporary.name)
+
+        old_manifest = (
+            external
+            / "datasets/lf3r_failure_rollouts/v1/failrecovery_manifest.jsonl"
+        )
+        old_manifest.parent.mkdir(parents=True)
+        video_rel = (
+            "datasets/lf3r_failure_rollouts/v1/"
+            "failrecovery/episode_001/videos/cam_high.mp4"
+        )
+        video = external / video_rel
+        video.parent.mkdir(parents=True)
+        video.write_bytes(b"video")
+        old_manifest.write_text(
+            json.dumps(
+                {
+                    "id": "usb_symlink",
+                    "task_key": "usb_insert",
+                    "total_frames": 1,
+                    "fps": 30,
+                    "camera_video_paths": {"cam_high": video_rel},
+                }
+            )
+            + "\n"
+        )
+        seed = external / "outputs/usb_event_intervals/run/intervals.jsonl"
+        seed.parent.mkdir(parents=True)
+        seed.write_text(
+            json.dumps(
+                {
+                    "rollout_id": "usb_symlink",
+                    "event_key": 6,
+                    "start_frame": 0,
+                    "end_frame": 0,
+                }
+            )
+            + "\n"
+        )
+
+        local_manifest = app.root / "datasets/failrecovery/manifest.jsonl"
+        local_manifest.unlink()
+        local_manifest.symlink_to(old_manifest)
+
+        app = TactileApplication(app.root)
+        self.assertEqual(app.manifest_path, old_manifest.resolve())
+        self.assertEqual(app.data_root, external.resolve())
+        self.assertEqual(app.source_file(video_rel), video.resolve())
+        self.assertEqual(app.annotation_seed_path(), seed.resolve())
+        self.assertIn("usb_symlink", app.rollout_map())
+
     def test_rejects_invalid_interval(self):
         temporary, app = self.make_app()
         self.addCleanup(temporary.cleanup)

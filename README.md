@@ -51,11 +51,11 @@ datasets/
 
 Manifest entries use the exported fields `camera_video_paths`, `synchronized_frames_path`, `tactile_events_path`, and `tactile_stream_paths`.
 
-Do not symlink the dataset tree when the manifest contains paths relative to the original project root. In **Settings → Source project root**, point directly to that original project (for example `/mnt/hdd/pyr/LF3R`). The WebUI uses `datasets/failrecovery/manifest.jsonl` in this standalone repository. For an unmigrated dissertation source, it also accepts the legacy `datasets/lf3r_failure_rollouts/v1/failrecovery_manifest.jsonl` and resolves every exported relative video/tactile path against the same source root. The standalone repository keeps its own annotations and experiment outputs.
+The fail-recovery payload does not need to be copied. `datasets/failrecovery/manifest.jsonl` may be a symlink to the original LF3R manifest. When it is linked, the WebUI resolves the symlink target, inspects the project-relative paths stored in that manifest, and automatically infers the original source-project root. Video, synchronization, tactile-event, tactile-stream, and historical interval-seed paths therefore continue to resolve against the original LF3R tree while new annotations stay local to this repository.
 
 ## One-command migration
 
-To make this repository self-contained from the dissertation/LF3R project, run:
+To connect this repository to an existing dissertation/LF3R data tree without copying the payload, run:
 
 ```bash
 bash tools/migrate_from_lf3r.sh /mnt/hdd/pyr/LF3R

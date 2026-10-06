@@ -20,3 +20,6 @@ artifacts/
 *.npy
 *.mp4
 *.bin
+
+# Runtime diagnostics / logs
+logs/

@@ -42,10 +42,7 @@ class WorkspaceAnnotationTest(unittest.TestCase):
         ]
         saved = app.save_rollout_annotations("usb_001", events)
         self.assertEqual([row["event_key"] for row in saved], [6, 7, 8, 9])
-        self.assertEqual(
-            [row["event_name"] for row in saved],
-            ["align_failure", "insert_failure", "align_success", "insert_success"],
-        )
+        self.assertTrue(all("event_name" not in row for row in saved))
         self.assertEqual(len(app.annotations_by_rollout()["usb_001"]), 4)
         self.assertEqual(app.annotation_target_path(), app.root / "annotations/failrecovery/records")
         self.assertTrue(app.annotation_record_path("usb_001").is_file())

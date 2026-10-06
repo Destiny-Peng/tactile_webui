@@ -38,7 +38,7 @@ EVENT_TYPES: dict[int, dict[str, str]] = {
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     "source_project_root": ".",
-    "annotations_path": "annotations/failure_annotations/v1/records",
+    "annotations_path": "annotations/failure_annotations/records",
     "annotation_seed_glob": "outputs/usb_event_intervals/*/intervals.jsonl",
     "runs_root": "outputs",
     "default_camera": "cam_high",
@@ -66,12 +66,15 @@ class TactileApplication:
         if not source.is_absolute():
             source = self.root / source
         self.source_root = source.resolve()
+        dataset_root = self.source_root / "datasets" / "lf3r_failure_rollouts"
+        flat_manifest = dataset_root / "failrecovery_manifest.jsonl"
+        legacy_manifest = dataset_root / "v1" / "failrecovery_manifest.jsonl"
+        # Prefer the standalone flat layout, while still allowing an old
+        # dissertation root to be used before migration.
         self.manifest_path = (
-            self.source_root
-            / "datasets"
-            / "lf3r_failure_rollouts"
-            / "v1"
-            / "failrecovery_manifest.jsonl"
+            flat_manifest
+            if flat_manifest.is_file() or not legacy_manifest.is_file()
+            else legacy_manifest
         )
         self.tactile = FailRecoveryTactileService(self.source_root, self.manifest_path)
         self._rollouts = None

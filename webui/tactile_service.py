@@ -37,7 +37,6 @@ class FailRecoveryTactileService:
             self.project_root
             / "datasets"
             / "lf3r_failure_rollouts"
-            / "v1"
             / "failrecovery_manifest.jsonl"
         )).expanduser().resolve()
         try:

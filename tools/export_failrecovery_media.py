@@ -28,7 +28,7 @@ from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SOURCE_ROOT = Path("/mnt/hdd/qiuxia/datasets/failrecovery")
-DATASET_ROOT = PROJECT_ROOT / "datasets/lf3r_failure_rollouts/v1"
+DATASET_ROOT = PROJECT_ROOT / "datasets/lf3r_failure_rollouts"
 EPISODE_ROOT = DATASET_ROOT / "failrecovery"
 MANIFEST_PATH = DATASET_ROOT / "failrecovery_manifest.jsonl"
 FINGERS = ("thumb", "index", "middle", "ring", "pinky")

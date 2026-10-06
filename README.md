@@ -73,18 +73,11 @@ python webui/server.py --root . --host 127.0.0.1 --port 8765
 
 Then open `http://127.0.0.1:8765/`.
 
-The detailed Results viewer is also directly available at `http://127.0.0.1:8765/tactile`.
+The synchronized tactile diagnostic viewer remains directly available at `http://127.0.0.1:8765/tactile`. The main **Results** page is now the online-detection review surface.
 
 ## Annotation schema
 
-The standalone annotator edits only the four USB tactile interval types already consumed by `tools/sharpa_tactile`:
-
-| event_key | label | outcome |
-|---:|---|---|
-| 6 | Align failure | failure |
-| 7 | Insert failure | failure |
-| 8 | Align success | success |
-| 9 | Insert success | success |
+The standalone annotator intentionally exposes only numeric labels **6, 7, 8, 9**. Semantic label names are not stored in new tactile sidecars or shown in the annotation UI.
 
 Each saved record keeps the experiment-compatible fields `rollout_id`, `event_index`, `event_key`, `start_frame`, and `end_frame`.
 
@@ -113,16 +106,20 @@ Q / W           set active interval start / end to the current frame
 Space           play / pause
 ```
 
-## Tactile Results viewer
+## Results and diagnostics
 
-Results keeps the optimized synchronized path from the dissertation WebUI:
+The main Results page reviews online detection against the robot video on one shared frame axis. It shows saved numeric annotation intervals, numeric GT labels, numeric predicted labels, and the three model probability curves (`p0`, `p1`, `p2`). Existing SHARPA `test_predictions.csv` files below the configured Runs root are discovered automatically.
 
-- synchronized robot video;
-- five-finger raw/deform tactile sprites;
-- F6 values/history;
-- one five-finger sprite per synchronized frame;
-- small forward sprite prefetch window;
-- de-duplicated tactile-series requests.
+The legacy `/tactile` route remains a low-level synchronized tactile diagnostic viewer.
+
+WebUI stability/performance telemetry is written only below:
+
+```text
+logs/webui/server/
+logs/webui/client/
+```
+
+The Settings → Diagnostics panel reports server/video latency, HTTP errors, browser video stalls/errors and the active log paths. Successful high-frequency tactile requests are sampled so monitoring does not add material I/O load.
 
 ## Tests
 

@@ -389,10 +389,11 @@ function renderIntervals() {
   }).join("");
   container.querySelectorAll(".interval-row").forEach(function (row) {
     var index = Number(row.dataset.eventIndex);
-    row.addEventListener("click", function () { state.activeEvent = index; renderIntervals(); renderAnnotateTimeline(); });
-    row.querySelector(".event-type").addEventListener("change", function (event) { event.stopPropagation(); state.events[index].event_key = Number(event.target.value); markDirty(); renderAnnotateTimeline(); });
-    row.querySelector(".event-start").addEventListener("change", function (event) { event.stopPropagation(); state.events[index].start_frame = clampFrame(event.target.value); if (state.events[index].end_frame < state.events[index].start_frame) state.events[index].end_frame = state.events[index].start_frame; markDirty(); renderIntervals(); renderAnnotateTimeline(); });
-    row.querySelector(".event-end").addEventListener("change", function (event) { event.stopPropagation(); state.events[index].end_frame = Math.max(state.events[index].start_frame, clampFrame(event.target.value)); markDirty(); renderIntervals(); renderAnnotateTimeline(); });
+    row.addEventListener("click", function (event) { if (event.target.closest("input,select,button")) return; state.activeEvent = index; renderIntervals(); renderAnnotateTimeline(); });
+    row.addEventListener("focusin", function () { state.activeEvent = index; container.querySelectorAll(".interval-row").forEach(function (item) { item.classList.toggle("active", Number(item.dataset.eventIndex) === index); }); renderAnnotateTimeline(); });
+    row.querySelector(".event-type").addEventListener("change", function (event) { event.stopPropagation(); state.activeEvent = index; state.events[index].event_key = Number(event.target.value); markDirty(); renderAnnotateTimeline(); });
+    row.querySelector(".event-start").addEventListener("change", function (event) { event.stopPropagation(); state.activeEvent = index; state.events[index].start_frame = clampFrame(event.target.value); if (state.events[index].end_frame < state.events[index].start_frame) state.events[index].end_frame = state.events[index].start_frame; markDirty(); renderIntervals(); renderAnnotateTimeline(); });
+    row.querySelector(".event-end").addEventListener("change", function (event) { event.stopPropagation(); state.activeEvent = index; state.events[index].end_frame = Math.max(state.events[index].start_frame, clampFrame(event.target.value)); markDirty(); renderIntervals(); renderAnnotateTimeline(); });
     row.querySelector(".use-start").addEventListener("click", function (event) { event.stopPropagation(); state.activeEvent = index; state.events[index].start_frame = state.currentFrame; if (state.events[index].end_frame < state.currentFrame) state.events[index].end_frame = state.currentFrame; markDirty(); renderIntervals(); renderAnnotateTimeline(); });
     row.querySelector(".use-end").addEventListener("click", function (event) { event.stopPropagation(); state.activeEvent = index; state.events[index].end_frame = Math.max(state.events[index].start_frame, state.currentFrame); markDirty(); renderIntervals(); renderAnnotateTimeline(); });
     row.querySelector(".jump-start").addEventListener("click", function (event) { event.stopPropagation(); seekFrame(state.events[index].start_frame); });
@@ -622,8 +623,8 @@ function monitorVideo(videoId, name) {
 }
 async function loadDiagnostics() {
   try {
-    var data = await jsonRequest("/api/diagnostics"); var latency = data.latency_ms || {}; var errors = (data.server_errors || []).length + (data.client_errors || []).length;
-    byId("diagnosticKpis").innerHTML = [['Requests',data.requests || 0],['p50',latency.p50 == null ? '—' : Math.round(latency.p50) + ' ms'],['p95',latency.p95 == null ? '—' : Math.round(latency.p95) + ' ms'],['Errors',errors],['Uptime',Math.round((data.uptime_seconds || 0)/60) + ' min'],['Video req',(data.resource_counts || {}).video || 0]].map(function (item) { return '<div class="diagnostic-kpi"><span class="eyebrow">' + escapeHtml(item[0]) + '</span><strong>' + escapeHtml(item[1]) + '</strong></div>'; }).join("");
+    var data = await jsonRequest("/api/diagnostics"); var videoLatency = (data.latency_by_resource_ms || {}).video || {}; var errors = (data.server_errors || []).length + (data.client_errors || []).length;
+    byId("diagnosticKpis").innerHTML = [['Requests',data.requests || 0],['Video p50',videoLatency.p50 == null ? '—' : Math.round(videoLatency.p50) + ' ms'],['Video p95',videoLatency.p95 == null ? '—' : Math.round(videoLatency.p95) + ' ms'],['Errors',errors],['Uptime',Math.round((data.uptime_seconds || 0)/60) + ' min'],['Video req',(data.resource_counts || {}).video || 0]].map(function (item) { return '<div class="diagnostic-kpi"><span class="eyebrow">' + escapeHtml(item[0]) + '</span><strong>' + escapeHtml(item[1]) + '</strong></div>'; }).join("");
     var videos = Object.keys(state.videoDiagnostics).map(function (key) { var row = state.videoDiagnostics[key]; return key + ': ' + row.text + (row.detail ? ' · ' + row.detail : '') + ' · ' + row.updated_at; }); byId("diagnosticVideo").textContent = videos.length ? videos.join("\n") : "No video events yet.";
     var errorRows = (data.server_errors || []).slice(-6).map(function (row) { return 'server ' + (row.status || '') + ' ' + (row.path || '') + ' · ' + Math.round(row.duration_ms || 0) + 'ms'; }).concat((data.client_errors || []).slice(-6).map(function (row) { return 'client ' + (row.event || '') + ' · ' + (row.message || row.src || row.url || ''); })); byId("diagnosticErrors").textContent = errorRows.length ? errorRows.join("\n") : "None.";
     var paths = data.log_paths || {}; byId("diagnosticPaths").textContent = 'server: ' + (paths.server || '—') + '\nclient: ' + (paths.client || '—');
@@ -635,11 +636,15 @@ async function checkHealth() {
 }
 function initPerformanceObserver() {
   if (!("PerformanceObserver" in window)) return;
+  var tactileCounter = 0;
   try {
     var observer = new PerformanceObserver(function (list) {
       list.getEntries().forEach(function (entry) {
-        if (entry.name.indexOf("/api/videos/") < 0 && entry.name.indexOf("/api/tactile/") < 0) return;
-        queueTelemetry({ event: "resource_timing", level: "info", url: entry.name, duration_ms: entry.duration, transfer_size: entry.transferSize || 0, encoded_size: entry.encodedBodySize || 0, decoded_size: entry.decodedBodySize || 0 });
+        var isVideo = entry.name.indexOf("/api/videos/") >= 0;
+        var isTactile = entry.name.indexOf("/api/tactile/") >= 0;
+        if (!isVideo && !isTactile) return;
+        if (isTactile) { tactileCounter += 1; if (entry.duration < 250 && tactileCounter % 30 !== 0) return; }
+        queueTelemetry({ event: "resource_timing", level: entry.duration >= 1000 ? "error" : "info", resource: isVideo ? "video" : "tactile", url: entry.name, duration_ms: entry.duration, transfer_size: entry.transferSize || 0, encoded_size: entry.encodedBodySize || 0, decoded_size: entry.decodedBodySize || 0 });
       });
     }); observer.observe({ type: "resource", buffered: true });
   } catch (_error) {}

@@ -34,12 +34,7 @@ except ImportError:  # direct ``python webui/server.py`` execution
     from tactile_service import FailRecoveryTactileService
 
 
-EVENT_TYPES: dict[int, dict[str, str]] = {
-    6: {"name": "align_failure", "label": "Align failure", "outcome": "failure", "phase": "align"},
-    7: {"name": "insert_failure", "label": "Insert failure", "outcome": "failure", "phase": "insert"},
-    8: {"name": "align_success", "label": "Align success", "outcome": "success", "phase": "align"},
-    9: {"name": "insert_success", "label": "Insert success", "outcome": "success", "phase": "insert"},
-}
+LABEL_KEYS = (6, 7, 8, 9)
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     "source_project_root": ".",
@@ -303,10 +298,10 @@ class TactileApplication:
             except (TypeError, ValueError):
                 continue
             rollout_id = str(row.get("rollout_id") or "")
-            if rollout_id and key in EVENT_TYPES:
+            if rollout_id and key in LABEL_KEYS:
                 item = dict(row)
                 item["event_key"] = key
-                item.setdefault("event_name", EVENT_TYPES[key]["name"])
+                item.pop("event_name", None)
                 grouped[rollout_id].append(item)
         for items in grouped.values():
             items.sort(
@@ -335,7 +330,7 @@ class TactileApplication:
                 end = int(raw.get("end_frame"))
             except (TypeError, ValueError) as exc:
                 raise ValueError(f"event {index + 1} has invalid key/start/end") from exc
-            if key not in EVENT_TYPES:
+            if key not in LABEL_KEYS:
                 raise ValueError(f"event {index + 1} has unsupported event_key {key}")
             if start < 0 or end < start:
                 raise ValueError(f"event {index + 1} requires 0 <= start <= end")
@@ -348,7 +343,6 @@ class TactileApplication:
                     "rollout_id": rollout_id,
                     "event_index": event_index,
                     "event_key": key,
-                    "event_name": EVENT_TYPES[key]["name"],
                     "start_frame": start,
                     "end_frame": end,
                     "notes": str(raw.get("notes") or ""),
@@ -406,7 +400,7 @@ class TactileApplication:
             ],
             "annotation_source": self._display_path(source, self.source_root) if source else None,
             "annotation_target": str(self.annotation_target_path().relative_to(self.root)),
-            "event_types": EVENT_TYPES,
+            "event_types": list(LABEL_KEYS),
         }
 
     # ---------- analysis / run browser ----------
@@ -431,12 +425,11 @@ class TactileApplication:
                 counter[key] += 1
                 duration_by_key[key].append(int(event["end_frame"]) - int(event["start_frame"]) + 1)
         type_rows = []
-        for key, spec in EVENT_TYPES.items():
+        for key in LABEL_KEYS:
             durations = duration_by_key[key]
             type_rows.append(
                 {
                     "event_key": key,
-                    **spec,
                     "count": counter[key],
                     "mean_duration_frames": (sum(durations) / len(durations)) if durations else None,
                 }
@@ -554,6 +547,7 @@ class TactileHandler(BaseHTTPRequestHandler):
             self.end_headers()
             return True
         except self.CLIENT_DISCONNECT_ERRORS:
+            self._client_disconnected = True
             return False
 
     def _read_json_body(self) -> dict[str, Any]:
@@ -720,7 +714,7 @@ class TactileHandler(BaseHTTPRequestHandler):
                 self.json_response(HTTPStatus.OK, self.app.rollout_payload())
                 return
             if path == "/api/event-types":
-                self.json_response(HTTPStatus.OK, {"event_types": EVENT_TYPES})
+                self.json_response(HTTPStatus.OK, {"event_types": list(LABEL_KEYS)})
                 return
             if path == "/api/analysis":
                 self.json_response(HTTPStatus.OK, self.app.analysis_summary())

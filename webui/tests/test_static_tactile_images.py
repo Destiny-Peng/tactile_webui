@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tools.materialize_tactile_images import materialize_rollout
+from tools.materialize_tactile_images import infer_data_root, materialize_rollout
 from webui.tactile_service import FailRecoveryTactileService
 
 
@@ -52,6 +52,30 @@ class StaticTactileImageTests(unittest.TestCase):
         service = FailRecoveryTactileService(root, manifest)
         self.assertEqual(service.static_image_path("episode_001", "index", "11", "deform"), expected)
         self.assertEqual(service.image("episode_001", "index", "11", "deform"), expected.read_bytes())
+
+    def test_infer_data_root_follows_external_manifest_paths(self):
+        standalone_tmp = tempfile.TemporaryDirectory()
+        external_tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(standalone_tmp.cleanup)
+        self.addCleanup(external_tmp.cleanup)
+        standalone = Path(standalone_tmp.name)
+        external = Path(external_tmp.name)
+
+        relative = "datasets/lf3r_failure_rollouts/v1/failrecovery/ep/frames.jsonl"
+        referenced = external / relative
+        referenced.parent.mkdir(parents=True)
+        referenced.write_text("{}\n", encoding="utf-8")
+        manifest = external / "datasets/lf3r_failure_rollouts/v1/failrecovery_manifest.jsonl"
+        manifest.parent.mkdir(parents=True, exist_ok=True)
+        manifest.write_text(json.dumps({
+            "id": "ep",
+            "synchronized_frames_path": relative,
+        }) + "\n", encoding="utf-8")
+
+        local_entry = standalone / "datasets/failrecovery/manifest.jsonl"
+        local_entry.parent.mkdir(parents=True)
+        local_entry.symlink_to(manifest)
+        self.assertEqual(infer_data_root(local_entry.resolve(), standalone), external.resolve())
 
 
 if __name__ == "__main__":

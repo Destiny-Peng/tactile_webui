@@ -1,22 +1,31 @@
-# LF3R Tactile
+# Tactile WebUI
 
-Standalone tactile tooling split from `Destiny-Peng/dissertation`.
+Standalone tactile annotation, synchronized visualization, and SHARPA experiment tooling split from `Destiny-Peng/dissertation`.
 
-This repository contains two related pieces:
+The repository keeps the familiar WebUI workspace shape while removing LF3R-specific repair and simulation dependencies. The top-level browser workspace has five pages:
 
-- a standalone browser UI for synchronized robot video + five-finger SHARPA tactile streams;
-- the SHARPA tactile representation / failure-prediction experiment code previously under `tools/sharpa_tactile`.
+- **Annotate** — real-robot video + synchronized five-finger tactile preview and interval annotation;
+- **Results** — the full tactile viewer with raw/deform sprites and F6 history curves;
+- **Runs** — read-only discovery of SHARPA experiment outputs under `outputs/`;
+- **Analysis** — annotation coverage and the four tactile event distributions;
+- **Settings** — standalone paths, default camera/image type, and theme.
 
-The source split was prepared from dissertation commit `6d211285ed33d6e8cab0a83f48893e531f90c07f`.
+There is intentionally no Repair page and no LIBERO, world-model, Robo-Dopamine, SAFE, or ProcVLM backend.
 
 ## Layout
 
 ```text
 webui/
-  server.py                 minimal standalone HTTP server
+  server.py                 standalone HTTP/API server
   tactile_service.py        synchronized tactile reader / sprite service
-  static/tactile/           standalone tactile UI
-  tests/test_tactile_service.py
+  static/
+    index.html              Annotate → Settings workspace shell
+    shell.js
+    shell.css
+    tactile/                 detailed tactile Results viewer
+  tests/
+    test_tactile_service.py
+    test_workspace.py
 
 tools/
   sharpa_tactile/           complete SHARPA tactile experiment package
@@ -31,7 +40,7 @@ Large data, model checkpoints, generated outputs and third-party repositories ar
 
 ## Expected data layout
 
-The WebUI and SHARPA scripts retain the dataset layout used by the dissertation project:
+The WebUI and SHARPA scripts retain the fail-recovery layout used by the dissertation project:
 
 ```text
 datasets/
@@ -42,11 +51,11 @@ datasets/
       ...
 ```
 
-Manifest entries use the existing exported fields, including `camera_video_paths`, `synchronized_frames_path`, `tactile_events_path`, and `tactile_stream_paths`.
+Manifest entries use the exported fields `camera_video_paths`, `synchronized_frames_path`, `tactile_events_path`, and `tactile_stream_paths`.
 
 Copy the dataset into this repository or symlink `datasets/lf3r_failure_rollouts` to the existing dataset location.
 
-## Run the tactile WebUI
+## Run the WebUI
 
 The WebUI backend uses only the Python standard library.
 
@@ -56,17 +65,68 @@ python webui/server.py --root . --host 127.0.0.1 --port 8765
 
 Then open `http://127.0.0.1:8765/`.
 
-The standalone UI keeps the optimized synchronized rendering path from the dissertation WebUI: one five-finger sprite per synchronized frame, a small sprite prefetch window, and de-duplicated tactile-series requests.
+The detailed Results viewer is also directly available at `http://127.0.0.1:8765/tactile`.
 
-Service test:
+## Annotation schema
+
+The standalone annotator edits only the four USB tactile interval types already consumed by `tools/sharpa_tactile`:
+
+| event_key | label | outcome |
+|---:|---|---|
+| 6 | Align failure | failure |
+| 7 | Insert failure | failure |
+| 8 | Align success | success |
+| 9 | Insert success | success |
+
+Each saved record keeps the experiment-compatible fields `rollout_id`, `event_index`, `event_key`, `start_frame`, and `end_frame`.
+
+The default writable annotation file is:
+
+```text
+annotations/tactile_intervals.jsonl
+```
+
+If that file does not yet exist, the WebUI looks for the latest historical source matching:
+
+```text
+outputs/usb_event_intervals/*/intervals.jsonl
+```
+
+That historical file is loaded as a **read-only seed**. On the first edit, all seed records are copied into the standalone annotation target and only the new target is modified. The original experiment input is not overwritten.
+
+Keyboard controls on Annotate:
+
+```text
+1 / 2 / 3 / 4   select keys 6 / 7 / 8 / 9
+Q / W           set active interval start / end to the current frame
+↑ / ↓           previous / next active interval
+, / .           previous / next rollout
+← / →           previous / next video frame
+Space           play / pause
+```
+
+## Tactile Results viewer
+
+Results keeps the optimized synchronized path from the dissertation WebUI:
+
+- synchronized robot video;
+- five-finger raw/deform tactile sprites;
+- F6 values/history;
+- one five-finger sprite per synchronized frame;
+- small forward sprite prefetch window;
+- de-duplicated tactile-series requests.
+
+## Tests
 
 ```bash
-python -m unittest webui.tests.test_tactile_service -v
+python -m unittest discover -s webui/tests -v
 ```
+
+The repository CI also runs Python compilation and JavaScript syntax checks.
 
 ## SHARPA tactile experiments
 
-The experiment package retains its original root assumptions. Put the external repositories under:
+The experiment package retains its root-relative layout. Put the external repositories under:
 
 ```text
 repos/T-Rex/
@@ -105,8 +165,8 @@ checkpoints/T-Rex/encoders/
 
 ## Dataset helpers
 
-`tools/export_failrecovery_media.py` and `tools/plot_failrecovery_tactile.py` are included because they produce and inspect the synchronized tactile representation consumed by both the WebUI and the SHARPA experiments.
+`tools/export_failrecovery_media.py` and `tools/plot_failrecovery_tactile.py` produce and inspect the synchronized tactile representation consumed by both the WebUI and SHARPA experiments.
 
 ## Intentionally excluded
 
-This split does not include LIBERO, repair/world-model code, general LF3R annotation/results pages, Robo-Dopamine/SAFE/ProcVLM integrations, generated experiment outputs, raw tactile datasets, model checkpoints, or vendored third-party repositories.
+This split does not include LIBERO, repair/world-model code, general LF3R baseline jobs, Robo-Dopamine/SAFE/ProcVLM integrations, raw tactile datasets, checkpoints, or vendored third-party repositories.

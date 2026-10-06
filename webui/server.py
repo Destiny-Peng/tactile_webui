@@ -37,7 +37,7 @@ EVENT_TYPES: dict[int, dict[str, str]] = {
 }
 
 DEFAULT_SETTINGS: dict[str, Any] = {
-    "annotations_path": "annotations/tactile_intervals.jsonl",
+    "annotations_path": "annotations/failure_annotations/v1/records",
     "annotation_seed_glob": "outputs/usb_event_intervals/*/intervals.jsonl",
     "runs_root": "outputs",
     "default_camera": "cam_high",
@@ -177,12 +177,15 @@ class TactileApplication:
     # ---------- tactile interval annotations ----------
 
     def annotation_target_path(self) -> Path:
-        return self.project_file(self._settings["annotations_path"], ".jsonl")
+        """Directory matching the original LF3R annotation record layout."""
+        return self.project_file(self._settings["annotations_path"])
+
+    def annotation_record_path(self, rollout_id: str) -> Path:
+        if not re.fullmatch(r"[A-Za-z0-9._-]{1,160}", rollout_id):
+            raise ValueError("invalid rollout id")
+        return self.annotation_target_path() / f"{rollout_id}.tactile.json"
 
     def annotation_seed_path(self) -> Path | None:
-        target = self.annotation_target_path()
-        if target.is_file():
-            return target
         pattern = str(self._settings["annotation_seed_glob"])
         candidates = sorted(
             (path for path in self.root.glob(pattern) if path.is_file()),
@@ -190,11 +193,40 @@ class TactileApplication:
         )
         return candidates[-1] if candidates else None
 
+    def _record_annotation_rows(self) -> list[dict[str, Any]]:
+        records_dir = self.annotation_target_path()
+        if not records_dir.is_dir():
+            return []
+        rows: list[dict[str, Any]] = []
+        for path in sorted(records_dir.glob("*.tactile.json")):
+            try:
+                record = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if not isinstance(record, dict):
+                continue
+            rollout_id = str(record.get("rollout_id") or path.name.removesuffix(".tactile.json"))
+            intervals = record.get("tactile_intervals")
+            if not isinstance(intervals, list):
+                continue
+            for raw in intervals:
+                if isinstance(raw, dict):
+                    item = dict(raw)
+                    item["rollout_id"] = rollout_id
+                    rows.append(item)
+        return rows
+
     def load_annotation_rows(self) -> tuple[list[dict[str, Any]], Path | None]:
         with self._annotation_lock:
-            source = self.annotation_seed_path()
-            rows = self._read_jsonl(source) if source is not None else []
-            return rows, source
+            seed = self.annotation_seed_path()
+            rows = self._read_jsonl(seed) if seed is not None else []
+            record_rows = self._record_annotation_rows()
+            edited_rollouts = {str(row.get("rollout_id") or "") for row in record_rows}
+            if edited_rollouts:
+                rows = [row for row in rows if str(row.get("rollout_id") or "") not in edited_rollouts]
+                rows.extend(record_rows)
+                return rows, self.annotation_target_path()
+            return rows, seed
 
     def annotations_by_rollout(self) -> dict[str, list[dict[str, Any]]]:
         rows, _ = self.load_annotation_rows()
@@ -264,32 +296,26 @@ class TactileApplication:
 
     def save_rollout_annotations(self, rollout_id: str, events: Any) -> list[dict[str, Any]]:
         normalized = self._validate_events(rollout_id, events)
-        target = self.annotation_target_path()
+        target = self.annotation_record_path(rollout_id)
         with self._annotation_lock:
-            existing, source = self.load_annotation_rows()
-            # If this is the first edit in the standalone repo, seed the new annotation
-            # file from the latest historical interval export without modifying it.
-            kept: list[dict[str, Any]] = []
-            for row in existing:
-                same_rollout = str(row.get("rollout_id") or "") == rollout_id
+            previous: dict[str, Any] = {}
+            if target.is_file():
                 try:
-                    editable_key = int(row.get("event_key")) in EVENT_TYPES
-                except (TypeError, ValueError):
-                    editable_key = False
-                if same_rollout and editable_key:
-                    continue
-                kept.append(row)
-            kept.extend(normalized)
-            kept.sort(
-                key=lambda row: (
-                    str(row.get("rollout_id") or ""),
-                    int(row.get("start_frame", 0) or 0),
-                    int(row.get("event_index", 0) or 0),
-                )
-            )
-            text = "".join(json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n" for row in kept)
-            self._atomic_text(target, text)
-            # Target now becomes the source on subsequent reads.
+                    loaded = json.loads(target.read_text(encoding="utf-8"))
+                    if isinstance(loaded, dict):
+                        previous = loaded
+                except (OSError, json.JSONDecodeError):
+                    previous = {}
+            now = datetime.now().astimezone().isoformat()
+            record = {
+                "schema_version": "tactile_intervals_v1",
+                "rollout_id": rollout_id,
+                "review_status": "complete" if normalized else "unreviewed",
+                "created_at": previous.get("created_at", now),
+                "updated_at": now,
+                "tactile_intervals": normalized,
+            }
+            self._atomic_text(target, json.dumps(record, indent=2, ensure_ascii=False) + "\n")
             return normalized
 
     def rollout_payload(self) -> dict[str, Any]:

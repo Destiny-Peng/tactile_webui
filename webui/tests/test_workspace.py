@@ -47,7 +47,21 @@ class WorkspaceAnnotationTest(unittest.TestCase):
             ["align_failure", "insert_failure", "align_success", "insert_success"],
         )
         self.assertEqual(len(app.annotations_by_rollout()["usb_001"]), 4)
-        self.assertTrue(app.annotation_target_path().is_file())
+        self.assertEqual(app.annotation_target_path(), app.root / "annotations/failure_annotations/v1/records")
+        self.assertTrue(app.annotation_record_path("usb_001").is_file())
+        record = json.loads(app.annotation_record_path("usb_001").read_text())
+        self.assertEqual([row["event_key"] for row in record["tactile_intervals"]], [6, 7, 8, 9])
+
+    def test_existing_lf3r_record_is_not_overwritten(self):
+        temporary, app = self.make_app()
+        self.addCleanup(temporary.cleanup)
+        records = app.root / "annotations/failure_annotations/v1/records"
+        records.mkdir(parents=True)
+        legacy = records / "usb_001.json"
+        legacy.write_text(json.dumps({"schema_version": 2, "rollout_id": "usb_001", "notes": "keep me"}))
+        app.save_rollout_annotations("usb_001", [{"event_key": 8, "start_frame": 10, "end_frame": 20}])
+        self.assertEqual(json.loads(legacy.read_text())["notes"], "keep me")
+        self.assertTrue((records / "usb_001.tactile.json").is_file())
 
     def test_rejects_invalid_interval(self):
         temporary, app = self.make_app()

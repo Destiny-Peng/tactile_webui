@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import csv
 import json
+import threading
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +15,12 @@ class OnlineResultsService:
 
     def __init__(self, project_root: Path) -> None:
         self.project_root = project_root.resolve()
+        self._cache_lock = threading.RLock()
+        self._source_cache: OrderedDict[
+            Path,
+            tuple[tuple[int, int], list[str], dict[str, list[dict[str, Any]]]],
+        ] = OrderedDict()
+        self._source_cache_limit = 4
 
     def _runs_root(self, value: str) -> Path:
         root = (self.project_root / value).resolve()
@@ -96,26 +104,45 @@ class OnlineResultsService:
             return int(float(step))
         raise ValueError("prediction row has no frame/sample_frames/step coordinate")
 
-    def curve(self, runs_root_value: str, source: str, rollout_id: str) -> dict[str, Any]:
-        path = self._resolve_source(runs_root_value, source)
+    @staticmethod
+    def _signature(path: Path) -> tuple[int, int]:
+        stat = path.stat()
+        return stat.st_mtime_ns, stat.st_size
+
+    def _load_source(
+        self,
+        path: Path,
+    ) -> tuple[list[str], dict[str, list[dict[str, Any]]]]:
+        signature = self._signature(path)
+        with self._cache_lock:
+            cached = self._source_cache.get(path)
+            if cached is not None and cached[0] == signature:
+                self._source_cache.move_to_end(path)
+                return cached[1], cached[2]
+
+        grouped: dict[str, list[dict[str, Any]]] = {}
         with path.open("r", encoding="utf-8", newline="") as handle:
             reader = csv.DictReader(handle)
             fields = list(reader.fieldnames or [])
             probability_columns = self._probability_columns(fields)
             if not probability_columns:
                 raise ValueError("prediction CSV has no supported three-class probability columns")
-            points: list[dict[str, Any]] = []
             for row in reader:
-                if str(row.get("rollout_id") or "") != rollout_id:
+                rollout_id = str(row.get("rollout_id") or "")
+                if not rollout_id:
                     continue
                 try:
                     probabilities = [float(row[name]) for name in probability_columns]
                     label = int(float(row["label"]))
-                    prediction = int(float(row["prediction"])) if row.get("prediction") not in (None, "") else max(range(len(probabilities)), key=probabilities.__getitem__)
+                    prediction = (
+                        int(float(row["prediction"]))
+                        if row.get("prediction") not in (None, "")
+                        else max(range(len(probabilities)), key=probabilities.__getitem__)
+                    )
                     frame = self._frame_from_row(row)
                 except (ValueError, TypeError, json.JSONDecodeError, KeyError):
                     continue
-                points.append(
+                grouped.setdefault(rollout_id, []).append(
                     {
                         "frame": frame,
                         "label": label,
@@ -123,7 +150,20 @@ class OnlineResultsService:
                         "probabilities": probabilities,
                     }
                 )
-        points.sort(key=lambda row: row["frame"])
+        for points in grouped.values():
+            points.sort(key=lambda row: row["frame"])
+
+        with self._cache_lock:
+            self._source_cache[path] = (signature, probability_columns, grouped)
+            self._source_cache.move_to_end(path)
+            while len(self._source_cache) > self._source_cache_limit:
+                self._source_cache.popitem(last=False)
+        return probability_columns, grouped
+
+    def curve(self, runs_root_value: str, source: str, rollout_id: str) -> dict[str, Any]:
+        path = self._resolve_source(runs_root_value, source)
+        _probability_columns, grouped = self._load_source(path)
+        points = [dict(point) for point in grouped.get(rollout_id, [])]
         return {
             "source": path.relative_to(self.project_root).as_posix(),
             "rollout_id": rollout_id,

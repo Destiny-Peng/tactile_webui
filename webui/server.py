@@ -15,6 +15,7 @@ import os
 import re
 import tempfile
 import threading
+import time
 from collections import Counter, defaultdict
 from datetime import datetime
 from http import HTTPStatus
@@ -24,8 +25,12 @@ from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
 try:  # package import for tests
+    from .monitoring import WebUIMonitor
+    from .results_service import OnlineResultsService
     from .tactile_service import FailRecoveryTactileService
 except ImportError:  # direct ``python webui/server.py`` execution
+    from monitoring import WebUIMonitor
+    from results_service import OnlineResultsService
     from tactile_service import FailRecoveryTactileService
 
 
@@ -56,6 +61,8 @@ class TactileApplication:
         self._rollouts: list[dict[str, Any]] | None = None
         self._rollout_map: dict[str, dict[str, Any]] | None = None
         self._annotation_lock = threading.RLock()
+        self.monitor = WebUIMonitor(self.root / "logs" / "webui")
+        self.results = OnlineResultsService(self.root)
         self._configure_data_source()
 
     # ---------- generic filesystem helpers ----------
@@ -489,12 +496,56 @@ class TactileHandler(BaseHTTPRequestHandler):
 
     CLIENT_DISCONNECT_ERRORS = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)
 
+    def _begin_request(self, method: str, path: str) -> None:
+        self._request_started = time.perf_counter()
+        self._request_method = method
+        self._request_path = path
+        self._request_status = 500
+        self._request_resource = "other"
+        self._response_bytes = None
+        self._client_disconnected = False
+        self._video_total_bytes = None
+        self._video_range = None
+        self._request_recorded = False
+
+    def send_response(self, code: int, message: str | None = None) -> None:
+        self._request_status = int(code)
+        super().send_response(code, message)
+
+    def finish(self) -> None:
+        try:
+            super().finish()
+        finally:
+            started = getattr(self, "_request_started", None)
+            if started is None or getattr(self, "_request_recorded", False):
+                return
+            self._request_recorded = True
+            try:
+                self.app.monitor.record_request(
+                    method=getattr(self, "_request_method", "?"),
+                    path=getattr(self, "_request_path", "?"),
+                    status=getattr(self, "_request_status", 500),
+                    resource=getattr(self, "_request_resource", "other"),
+                    duration_ms=round((time.perf_counter() - started) * 1000.0, 3),
+                    response_bytes=getattr(self, "_response_bytes", None),
+                    client_disconnected=bool(getattr(self, "_client_disconnected", False)),
+                    range=getattr(self, "_video_range", None),
+                    video_total_bytes=getattr(self, "_video_total_bytes", None),
+                )
+            except OSError:
+                pass
+
+    def log_message(self, format: str, *args: Any) -> None:
+        # Structured request logging is handled by WebUIMonitor in finish().
+        return
+
     def _safe_write(self, data: bytes) -> bool:
         try:
             self.wfile.write(data)
             return True
         except self.CLIENT_DISCONNECT_ERRORS:
             self.close_connection = True
+            self._client_disconnected = True
             return False
 
     def _finish_headers(self) -> bool:
@@ -518,7 +569,9 @@ class TactileHandler(BaseHTTPRequestHandler):
         return payload
 
     def json_response(self, status: int, payload: Any) -> None:
+        self._request_resource = "api"
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self._response_bytes = len(body)
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
@@ -531,10 +584,12 @@ class TactileHandler(BaseHTTPRequestHandler):
         self.json_response(status, {"error": message})
 
     def serve_static(self, path: Path) -> None:
+        self._request_resource = "static"
         if not path.is_file():
             self.json_error(HTTPStatus.NOT_FOUND, "Static file not found")
             return
         body = path.read_bytes()
+        self._response_bytes = len(body)
         content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
         if content_type.startswith("text/") or content_type in {"application/javascript", "application/json"}:
             content_type += "; charset=utf-8"
@@ -547,6 +602,8 @@ class TactileHandler(BaseHTTPRequestHandler):
             self._safe_write(body)
 
     def serve_png(self, body: bytes) -> None:
+        self._request_resource = "tactile"
+        self._response_bytes = len(body)
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "image/png")
         self.send_header("Content-Length", str(len(body)))
@@ -556,6 +613,7 @@ class TactileHandler(BaseHTTPRequestHandler):
             self._safe_write(body)
 
     def serve_video(self, path: Path) -> None:
+        self._request_resource = "video"
         if not path.is_file():
             self.json_error(HTTPStatus.NOT_FOUND, "Video not found")
             return
@@ -581,6 +639,9 @@ class TactileHandler(BaseHTTPRequestHandler):
             end = min(end, size - 1)
             status = HTTPStatus.PARTIAL_CONTENT
         length = end - start + 1
+        self._response_bytes = length
+        self._video_total_bytes = size
+        self._video_range = [start, end] if range_header else None
         self.send_response(status)
         self.send_header("Content-Type", "video/mp4")
         self.send_header("Accept-Ranges", "bytes")
@@ -641,6 +702,7 @@ class TactileHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = unquote(parsed.path)
         query = parse_qs(parsed.query, keep_blank_values=True)
+        self._begin_request("GET", path)
         try:
             if path == "/api/health":
                 self.json_response(
@@ -665,6 +727,35 @@ class TactileHandler(BaseHTTPRequestHandler):
                 return
             if path == "/api/runs":
                 self.json_response(HTTPStatus.OK, {"runs": self.app.list_runs(), "runs_root": self.app.settings["runs_root"]})
+                return
+            if path == "/api/results/sources":
+                self.json_response(
+                    HTTPStatus.OK,
+                    {"sources": self.app.results.list_sources(self.app.settings["runs_root"])},
+                )
+                return
+            if path == "/api/results/curve":
+                source = str(query.get("source", [""])[0] or "").strip()
+                rollout_id = str(query.get("rollout_id", [""])[0] or "").strip()
+                if not source or not rollout_id:
+                    raise ValueError("source and rollout_id are required")
+                if rollout_id not in self.app.rollout_map():
+                    self.json_error(HTTPStatus.NOT_FOUND, "Unknown rollout")
+                    return
+                result = self.app.results.curve(self.app.settings["runs_root"], source, rollout_id)
+                result["annotation_events"] = self.app.annotations_by_rollout().get(rollout_id, [])
+                self.json_response(HTTPStatus.OK, result)
+                return
+            if path == "/api/diagnostics":
+                snapshot = self.app.monitor.snapshot()
+                snapshot.update(
+                    {
+                        "manifest_exists": self.app.manifest_path.is_file(),
+                        "manifest": self.app._display_path(self.app.manifest_path, self.app.source_root),
+                        "source_project_root": str(self.app.source_root),
+                    }
+                )
+                self.json_response(HTTPStatus.OK, snapshot)
                 return
             if path == "/api/settings":
                 source = self.app.annotation_seed_path()
@@ -732,8 +823,16 @@ class TactileHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
         path = unquote(parsed.path)
+        self._begin_request("POST", path)
         try:
             payload = self._read_json_body()
+            if path == "/api/telemetry":
+                events = payload.get("events")
+                if not isinstance(events, list):
+                    raise ValueError("events must be a list")
+                accepted = self.app.monitor.record_client_events(events)
+                self.json_response(HTTPStatus.OK, {"accepted": accepted})
+                return
             if path == "/api/settings":
                 self.json_response(HTTPStatus.OK, {"settings": self.app.save_settings(payload)})
                 return
@@ -771,6 +870,8 @@ def main() -> None:
     print(f"Tactile WebUI: http://{args.host}:{args.port}/", flush=True)
     print(f"Dataset manifest: {app.manifest_path}", flush=True)
     print(f"Annotation target: {app.annotation_target_path()}", flush=True)
+    print(f"WebUI logs: {app.monitor.root}", flush=True)
+    app.monitor.record_server_event("server_start", host=args.host, port=args.port)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

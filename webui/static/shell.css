@@ -176,6 +176,8 @@ input:focus, select:focus { outline: 0; border-color: rgba(79,125,243,.78); box-
 .timeline-help { color: var(--muted); font-size: .6rem; }
 .precision-timeline { position: relative; min-height: 182px; padding: 23px 10px 23px 44px; overflow: hidden; background: linear-gradient(180deg,#fbfcfe,#f7f9fc); border: 1px solid var(--line-soft); border-radius: 9px; user-select: none; }
 .precision-timeline.compact-timeline { min-height: 142px; }
+.timeline-track-area { position: relative; min-height: 134px; margin-left: 34px; }
+.compact-timeline .timeline-track-area { min-height: 96px; }
 .timeline-gridline { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(126,145,168,.18); pointer-events: none; }
 .timeline-axis-label { position: absolute; bottom: 5px; color: #8290a1; font: .55rem/1 ui-monospace,monospace; transform: translateX(-50%); pointer-events: none; }
 .timeline-lane { position: relative; height: 28px; margin-bottom: 7px; border-radius: 6px; background: #edf2f7; overflow: visible; cursor: crosshair; }

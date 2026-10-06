@@ -39,7 +39,8 @@ jobs:
           js=Path('webui/static/shell.js').read_text()
           ids=set(re.findall(r'\bid="([^"]+)"',html))
           refs=set(re.findall(r'byId\("([^"]+)"\)',js))
-          missing=sorted(refs-ids)
+          dynamic={'resultsCurvePlayhead','resultsCurvePoint'}
+          missing=sorted(refs-ids-dynamic)
           if missing: raise SystemExit('missing DOM ids: '+', '.join(missing))
           print('DOM contract OK:',len(refs),'referenced ids')
           PY

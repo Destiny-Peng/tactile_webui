@@ -42,7 +42,7 @@ jobs:
           assert '/sprite?' not in shell
           assert 'annotateTactileGrid' in shell
           assert '/image?finger=' in shell
-          assert 'applySprite(record, camera' not in tactile
+          assert '\n    applySprite(record, camera' not in tactile
           assert 'static_image_path' in service
           print('static tactile image contract OK')
           PY

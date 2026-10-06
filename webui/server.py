@@ -1,23 +1,49 @@
 #!/usr/bin/env python3
-"""Standalone LF3R tactile WebUI server.
+"""Standalone tactile WebUI server.
 
-Serves the split tactile UI plus the fail-recovery manifest, synchronized tactile
-series/sprites, and camera videos. No LF3R annotation/analysis services are
-required.
+The server intentionally keeps only the fail-recovery tactile dataset and the
+SHARPA experiment surface.  It provides the same high-level workspace shape as
+the dissertation WebUI (Annotate / Results / Runs / Analysis / Settings)
+without importing the LF3R repair, LIBERO, baseline, or world-model backend.
 """
 from __future__ import annotations
 
 import argparse
 import json
 import mimetypes
+import os
 import re
+import tempfile
+import threading
+from collections import Counter, defaultdict
+from datetime import datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
-from tactile_service import FailRecoveryTactileService
+try:  # package import for tests
+    from .tactile_service import FailRecoveryTactileService
+except ImportError:  # direct ``python webui/server.py`` execution
+    from tactile_service import FailRecoveryTactileService
+
+
+EVENT_TYPES: dict[int, dict[str, str]] = {
+    6: {"name": "align_failure", "label": "Align failure", "outcome": "failure", "phase": "align"},
+    7: {"name": "insert_failure", "label": "Insert failure", "outcome": "failure", "phase": "insert"},
+    8: {"name": "align_success", "label": "Align success", "outcome": "success", "phase": "align"},
+    9: {"name": "insert_success", "label": "Insert success", "outcome": "success", "phase": "insert"},
+}
+
+DEFAULT_SETTINGS: dict[str, Any] = {
+    "annotations_path": "annotations/tactile_intervals.jsonl",
+    "annotation_seed_glob": "outputs/usb_event_intervals/*/intervals.jsonl",
+    "runs_root": "outputs",
+    "default_camera": "cam_high",
+    "default_tactile_kind": "deform",
+    "theme": "light",
+}
 
 
 class TactileApplication:
@@ -31,9 +57,14 @@ class TactileApplication:
             / "v1"
             / "failrecovery_manifest.jsonl"
         )
+        self.settings_path = self.root / ".tactile_webui" / "settings.json"
+        self._settings = self._load_settings()
         self.tactile = FailRecoveryTactileService(self.root)
         self._rollouts: list[dict[str, Any]] | None = None
         self._rollout_map: dict[str, dict[str, Any]] | None = None
+        self._annotation_lock = threading.RLock()
+
+    # ---------- generic filesystem helpers ----------
 
     def project_file(self, value: Any, suffix: str | None = None) -> Path:
         if not isinstance(value, str) or not value.strip():
@@ -47,22 +78,91 @@ class TactileApplication:
             raise ValueError(f"expected {suffix} file")
         return path
 
-    def load_rollouts(self) -> list[dict[str, Any]]:
-        if self._rollouts is not None:
+    @staticmethod
+    def _read_jsonl(path: Path) -> list[dict[str, Any]]:
+        if not path.is_file():
+            return []
+        rows: list[dict[str, Any]] = []
+        with path.open("r", encoding="utf-8") as handle:
+            for line_number, line in enumerate(handle, 1):
+                if not line.strip():
+                    continue
+                value = json.loads(line)
+                if not isinstance(value, dict):
+                    raise ValueError(f"Expected object in {path}:{line_number}")
+                rows.append(value)
+        return rows
+
+    @staticmethod
+    def _atomic_text(path: Path, content: str) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+        )
+        temporary = Path(temporary_name)
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                handle.write(content)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    # ---------- settings ----------
+
+    def _load_settings(self) -> dict[str, Any]:
+        settings = dict(DEFAULT_SETTINGS)
+        if self.settings_path.is_file():
+            loaded = json.loads(self.settings_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                settings.update({key: loaded[key] for key in DEFAULT_SETTINGS if key in loaded})
+        return settings
+
+    @property
+    def settings(self) -> dict[str, Any]:
+        return dict(self._settings)
+
+    def save_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
+        settings = dict(self._settings)
+        for key in DEFAULT_SETTINGS:
+            if key not in payload:
+                continue
+            value = payload[key]
+            if key in {"annotations_path", "annotation_seed_glob", "runs_root"}:
+                if not isinstance(value, str) or not value.strip():
+                    raise ValueError(f"{key} must be a non-empty relative path")
+                if Path(value).is_absolute() or ".." in Path(value).parts:
+                    raise ValueError(f"{key} must remain inside the repository")
+                settings[key] = value.strip()
+            elif key == "default_camera":
+                settings[key] = str(value or "cam_high").strip()
+            elif key == "default_tactile_kind":
+                if value not in {"raw", "deform"}:
+                    raise ValueError("default_tactile_kind must be raw or deform")
+                settings[key] = value
+            elif key == "theme":
+                if value not in {"light", "dark"}:
+                    raise ValueError("theme must be light or dark")
+                settings[key] = value
+        self._settings = settings
+        self._atomic_text(self.settings_path, json.dumps(settings, indent=2, ensure_ascii=False) + "\n")
+        return self.settings
+
+    # ---------- rollout manifest ----------
+
+    def load_rollouts(self, refresh: bool = False) -> list[dict[str, Any]]:
+        if self._rollouts is not None and not refresh:
             return self._rollouts
         rows: list[dict[str, Any]] = []
         if self.manifest_path.is_file():
-            with self.manifest_path.open("r", encoding="utf-8") as handle:
-                for line in handle:
-                    if not line.strip():
-                        continue
-                    value = json.loads(line)
-                    if not isinstance(value, dict):
-                        continue
-                    row = dict(value)
-                    row.setdefault("manifest_source", str(self.manifest_path.relative_to(self.root)))
-                    row.setdefault("manifest_label", "failrecovery")
-                    rows.append(row)
+            for value in self._read_jsonl(self.manifest_path):
+                row = dict(value)
+                row.setdefault("manifest_source", str(self.manifest_path.relative_to(self.root)))
+                row.setdefault("manifest_label", "failrecovery")
+                row.setdefault("source_kind", "real_robot")
+                row.setdefault("task_description", row.get("instruction") or row.get("task_key") or "Tactile task")
+                rows.append(row)
         self._rollouts = rows
         self._rollout_map = {
             str(row.get("id")): row for row in rows if str(row.get("id") or "").strip()
@@ -74,20 +174,235 @@ class TactileApplication:
             self.load_rollouts()
         return self._rollout_map or {}
 
+    # ---------- tactile interval annotations ----------
+
+    def annotation_target_path(self) -> Path:
+        return self.project_file(self._settings["annotations_path"], ".jsonl")
+
+    def annotation_seed_path(self) -> Path | None:
+        target = self.annotation_target_path()
+        if target.is_file():
+            return target
+        pattern = str(self._settings["annotation_seed_glob"])
+        candidates = sorted(
+            (path for path in self.root.glob(pattern) if path.is_file()),
+            key=lambda path: (path.stat().st_mtime_ns, str(path)),
+        )
+        return candidates[-1] if candidates else None
+
+    def load_annotation_rows(self) -> tuple[list[dict[str, Any]], Path | None]:
+        with self._annotation_lock:
+            source = self.annotation_seed_path()
+            rows = self._read_jsonl(source) if source is not None else []
+            return rows, source
+
+    def annotations_by_rollout(self) -> dict[str, list[dict[str, Any]]]:
+        rows, _ = self.load_annotation_rows()
+        grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for row in rows:
+            try:
+                key = int(row.get("event_key"))
+            except (TypeError, ValueError):
+                continue
+            rollout_id = str(row.get("rollout_id") or "")
+            if rollout_id and key in EVENT_TYPES:
+                item = dict(row)
+                item["event_key"] = key
+                item.setdefault("event_name", EVENT_TYPES[key]["name"])
+                grouped[rollout_id].append(item)
+        for items in grouped.values():
+            items.sort(
+                key=lambda event: (
+                    int(event.get("start_frame", 0)),
+                    int(event.get("end_frame", 0)),
+                    int(event.get("event_index", 0)),
+                )
+            )
+        return grouped
+
+    def _validate_events(self, rollout_id: str, events: Any) -> list[dict[str, Any]]:
+        if not isinstance(events, list):
+            raise ValueError("events must be a list")
+        record = self.rollout_map().get(rollout_id)
+        if not record:
+            raise KeyError("Unknown rollout")
+        total_frames = int(record.get("total_frames") or 0)
+        normalized: list[dict[str, Any]] = []
+        for index, raw in enumerate(events):
+            if not isinstance(raw, dict):
+                raise ValueError(f"event {index + 1} must be an object")
+            try:
+                key = int(raw.get("event_key"))
+                start = int(raw.get("start_frame"))
+                end = int(raw.get("end_frame"))
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"event {index + 1} has invalid key/start/end") from exc
+            if key not in EVENT_TYPES:
+                raise ValueError(f"event {index + 1} has unsupported event_key {key}")
+            if start < 0 or end < start:
+                raise ValueError(f"event {index + 1} requires 0 <= start <= end")
+            if total_frames and end >= total_frames:
+                raise ValueError(f"event {index + 1} end {end} exceeds rollout length {total_frames}")
+            event_index = index
+            normalized.append(
+                {
+                    "event_id": f"{rollout_id}:event:{event_index}",
+                    "rollout_id": rollout_id,
+                    "event_index": event_index,
+                    "event_key": key,
+                    "event_name": EVENT_TYPES[key]["name"],
+                    "start_frame": start,
+                    "end_frame": end,
+                    "notes": str(raw.get("notes") or ""),
+                }
+            )
+        normalized.sort(key=lambda event: (event["start_frame"], event["end_frame"], event["event_key"]))
+        for index, event in enumerate(normalized):
+            event["event_index"] = index
+            event["event_id"] = f"{rollout_id}:event:{index}"
+        return normalized
+
+    def save_rollout_annotations(self, rollout_id: str, events: Any) -> list[dict[str, Any]]:
+        normalized = self._validate_events(rollout_id, events)
+        target = self.annotation_target_path()
+        with self._annotation_lock:
+            existing, source = self.load_annotation_rows()
+            # If this is the first edit in the standalone repo, seed the new annotation
+            # file from the latest historical interval export without modifying it.
+            kept: list[dict[str, Any]] = []
+            for row in existing:
+                same_rollout = str(row.get("rollout_id") or "") == rollout_id
+                try:
+                    editable_key = int(row.get("event_key")) in EVENT_TYPES
+                except (TypeError, ValueError):
+                    editable_key = False
+                if same_rollout and editable_key:
+                    continue
+                kept.append(row)
+            kept.extend(normalized)
+            kept.sort(
+                key=lambda row: (
+                    str(row.get("rollout_id") or ""),
+                    int(row.get("start_frame", 0) or 0),
+                    int(row.get("event_index", 0) or 0),
+                )
+            )
+            text = "".join(json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n" for row in kept)
+            self._atomic_text(target, text)
+            # Target now becomes the source on subsequent reads.
+            return normalized
+
+    def rollout_payload(self) -> dict[str, Any]:
+        annotations = self.annotations_by_rollout()
+        rows = []
+        for original in self.load_rollouts():
+            row = dict(original)
+            events = annotations.get(str(row.get("id")), [])
+            row["annotation_events"] = events
+            row["annotation_status"] = "complete" if events else "unreviewed"
+            rows.append(row)
+        source = self.annotation_seed_path()
+        return {
+            "rollouts": rows,
+            "manifests": [
+                {
+                    "path": str(self.manifest_path.relative_to(self.root)),
+                    "label": "failrecovery",
+                    "rollouts": len(rows),
+                    "valid": self.manifest_path.is_file(),
+                }
+            ],
+            "annotation_source": str(source.relative_to(self.root)) if source else None,
+            "annotation_target": str(self.annotation_target_path().relative_to(self.root)),
+            "event_types": EVENT_TYPES,
+        }
+
+    # ---------- analysis / run browser ----------
+
+    def analysis_summary(self) -> dict[str, Any]:
+        rollouts = self.load_rollouts()
+        grouped = self.annotations_by_rollout()
+        counter: Counter[int] = Counter()
+        duration_by_key: dict[int, list[int]] = defaultdict(list)
+        task_rows: dict[str, dict[str, Any]] = {}
+        for record in rollouts:
+            rollout_id = str(record.get("id") or "")
+            task = str(record.get("task_key") or record.get("task_description") or record.get("task_id") or "unknown")
+            task_row = task_rows.setdefault(task, {"task": task, "rollouts": 0, "reviewed": 0, "events": 0})
+            task_row["rollouts"] += 1
+            events = grouped.get(rollout_id, [])
+            if events:
+                task_row["reviewed"] += 1
+            task_row["events"] += len(events)
+            for event in events:
+                key = int(event["event_key"])
+                counter[key] += 1
+                duration_by_key[key].append(int(event["end_frame"]) - int(event["start_frame"]) + 1)
+        type_rows = []
+        for key, spec in EVENT_TYPES.items():
+            durations = duration_by_key[key]
+            type_rows.append(
+                {
+                    "event_key": key,
+                    **spec,
+                    "count": counter[key],
+                    "mean_duration_frames": (sum(durations) / len(durations)) if durations else None,
+                }
+            )
+        reviewed = sum(1 for record in rollouts if grouped.get(str(record.get("id") or "")))
+        return {
+            "rollouts": len(rollouts),
+            "reviewed_rollouts": reviewed,
+            "coverage": reviewed / len(rollouts) if rollouts else 0.0,
+            "events": sum(counter.values()),
+            "event_types": type_rows,
+            "tasks": sorted(task_rows.values(), key=lambda row: row["task"]),
+            "annotation_source": str(self.annotation_seed_path().relative_to(self.root)) if self.annotation_seed_path() else None,
+            "annotation_target": str(self.annotation_target_path().relative_to(self.root)),
+        }
+
+    def list_runs(self) -> list[dict[str, Any]]:
+        root = self.project_file(self._settings["runs_root"])
+        if not root.is_dir():
+            return []
+        markers = {
+            "README.md",
+            "results.json",
+            "suite_status.json",
+            "training_manifest.json",
+            "data_manifest.json",
+            "dataset_manifest.json",
+        }
+        found: dict[Path, set[str]] = defaultdict(set)
+        for marker in markers:
+            for path in root.glob(f"**/{marker}"):
+                if not path.is_file():
+                    continue
+                relative = path.parent.relative_to(root)
+                if len(relative.parts) > 4:
+                    continue
+                found[path.parent].add(marker)
+        rows: list[dict[str, Any]] = []
+        for directory, names in found.items():
+            stat = directory.stat()
+            rows.append(
+                {
+                    "path": str(directory.relative_to(self.root)),
+                    "name": directory.name,
+                    "markers": sorted(names),
+                    "modified_at": datetime.fromtimestamp(stat.st_mtime).astimezone().isoformat(),
+                }
+            )
+        rows.sort(key=lambda row: row["modified_at"], reverse=True)
+        return rows[:200]
+
 
 class TactileHandler(BaseHTTPRequestHandler):
     app: TactileApplication
     protocol_version = "HTTP/1.0"
-    server_version = "LF3RTactile/1.0"
+    server_version = "TactileWebUI/2.0"
 
-    CLIENT_DISCONNECT_ERRORS = (
-        BrokenPipeError,
-        ConnectionResetError,
-        ConnectionAbortedError,
-    )
-
-    def log_message(self, fmt: str, *args: Any) -> None:
-        super().log_message(fmt, *args)
+    CLIENT_DISCONNECT_ERRORS = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)
 
     def _safe_write(self, data: bytes) -> bool:
         try:
@@ -104,6 +419,18 @@ class TactileHandler(BaseHTTPRequestHandler):
             return True
         except self.CLIENT_DISCONNECT_ERRORS:
             return False
+
+    def _read_json_body(self) -> dict[str, Any]:
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError as exc:
+            raise ValueError("Invalid Content-Length") from exc
+        if length <= 0 or length > 8 * 1024 * 1024:
+            raise ValueError("JSON request body is empty or too large")
+        payload = json.loads(self.rfile.read(length).decode("utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("JSON body must be an object")
+        return payload
 
     def json_response(self, status: int, payload: Any) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -188,20 +515,42 @@ class TactileHandler(BaseHTTPRequestHandler):
                 remaining -= len(chunk)
 
     @staticmethod
-    def _camera_for_rollout(rollout: dict[str, Any], query: dict[str, list[str]]) -> str:
+    def _camera_for_rollout(rollout: dict[str, Any], query: dict[str, list[str]], default: str) -> str:
         camera_paths = rollout.get("camera_video_paths")
         if not isinstance(camera_paths, dict) or not camera_paths:
             raise KeyError("Rollout has no camera videos")
-        camera = str(query.get("camera", [""])[0] or "").strip()
-        if camera and camera in camera_paths:
+        camera = str(query.get("camera", [default])[0] or default).strip()
+        if camera in camera_paths:
             return camera
         observation = rollout.get("observation_key")
         if isinstance(observation, str) and observation in camera_paths:
             return observation
-        for preferred in ("cam_high", "cam_wrist", "cam_left_wrist", "cam_right_wrist"):
+        for preferred in (default, "cam_high", "cam_wrist", "cam_left_wrist", "cam_right_wrist"):
             if preferred in camera_paths:
                 return preferred
         return str(next(iter(camera_paths)))
+
+    def _route_tactile(self, rollout_id: str, resource: str, query: dict[str, list[str]]) -> None:
+        camera = str(query.get("camera", [self.app.settings["default_camera"]])[0] or self.app.settings["default_camera"])
+        if resource == "series":
+            self.json_response(HTTPStatus.OK, {"tactile": self.app.tactile.series(rollout_id, camera)})
+            return
+        if resource == "frame":
+            frame = int(query.get("frame", ["0"])[0])
+            self.json_response(HTTPStatus.OK, {"tactile": self.app.tactile.frame(rollout_id, camera, frame)})
+            return
+        if resource == "sprite":
+            frame = int(query.get("frame", ["0"])[0])
+            kind = str(query.get("kind", [self.app.settings["default_tactile_kind"]])[0] or self.app.settings["default_tactile_kind"])
+            self.serve_png(self.app.tactile.sprite(rollout_id, camera, frame, kind))
+            return
+        if resource == "image":
+            finger = str(query.get("finger", [""])[0] or "")
+            event_id = str(query.get("event_id", [""])[0] or "")
+            kind = str(query.get("kind", [self.app.settings["default_tactile_kind"]])[0] or self.app.settings["default_tactile_kind"])
+            self.serve_png(self.app.tactile.image(rollout_id, finger, event_id, kind))
+            return
+        self.json_error(HTTPStatus.NOT_FOUND, "Tactile resource not found")
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
@@ -214,80 +563,68 @@ class TactileHandler(BaseHTTPRequestHandler):
                     {
                         "status": "ok",
                         "manifest": str(self.app.manifest_path),
+                        "manifest_exists": self.app.manifest_path.is_file(),
                         "rollouts": len(self.app.load_rollouts()),
+                        "annotations": str(self.app.annotation_target_path()),
                     },
                 )
                 return
-
             if path == "/api/rollouts":
-                rows = self.app.load_rollouts()
+                self.json_response(HTTPStatus.OK, self.app.rollout_payload())
+                return
+            if path == "/api/event-types":
+                self.json_response(HTTPStatus.OK, {"event_types": EVENT_TYPES})
+                return
+            if path == "/api/analysis":
+                self.json_response(HTTPStatus.OK, self.app.analysis_summary())
+                return
+            if path == "/api/runs":
+                self.json_response(HTTPStatus.OK, {"runs": self.app.list_runs(), "runs_root": self.app.settings["runs_root"]})
+                return
+            if path == "/api/settings":
+                source = self.app.annotation_seed_path()
                 self.json_response(
                     HTTPStatus.OK,
                     {
-                        "rollouts": rows,
-                        "manifests": [
-                            {
-                                "path": str(self.app.manifest_path.relative_to(self.app.root)),
-                                "label": "failrecovery",
-                                "rollouts": len(rows),
-                                "valid": self.app.manifest_path.is_file(),
-                            }
-                        ],
+                        "settings": self.app.settings,
+                        "manifest_path": str(self.app.manifest_path.relative_to(self.app.root)),
+                        "manifest_exists": self.app.manifest_path.is_file(),
+                        "annotation_source": str(source.relative_to(self.app.root)) if source else None,
+                        "annotation_target": str(self.app.annotation_target_path().relative_to(self.app.root)),
                     },
                 )
                 return
-
+            if path.startswith("/api/annotations/"):
+                rollout_id = path[len("/api/annotations/"):].strip("/")
+                if rollout_id not in self.app.rollout_map():
+                    self.json_error(HTTPStatus.NOT_FOUND, "Unknown rollout")
+                    return
+                events = self.app.annotations_by_rollout().get(rollout_id, [])
+                self.json_response(HTTPStatus.OK, {"rollout_id": rollout_id, "events": events})
+                return
             if path.startswith("/api/videos/"):
                 rollout_id = path[len("/api/videos/"):].strip("/")
                 rollout = self.app.rollout_map().get(rollout_id)
                 if not rollout:
                     self.json_error(HTTPStatus.NOT_FOUND, "Unknown rollout")
                     return
-                camera = self._camera_for_rollout(rollout, query)
+                camera = self._camera_for_rollout(rollout, query, self.app.settings["default_camera"])
                 camera_paths = rollout.get("camera_video_paths") or {}
-                value = camera_paths.get(camera)
-                video = self.app.project_file(value, ".mp4")
-                self.serve_video(video)
+                self.serve_video(self.app.project_file(camera_paths.get(camera), ".mp4"))
                 return
-
             if path.startswith("/api/tactile/"):
                 parts = path.strip("/").split("/")
                 if len(parts) != 4 or parts[:2] != ["api", "tactile"]:
                     self.json_error(HTTPStatus.NOT_FOUND, "Tactile resource not found")
                     return
-                rollout_id, resource = parts[2], parts[3]
-                camera = str(query.get("camera", ["cam_high"])[0] or "cam_high")
-                if resource == "series":
-                    self.json_response(
-                        HTTPStatus.OK,
-                        {"tactile": self.app.tactile.series(rollout_id, camera)},
-                    )
-                    return
-                if resource == "frame":
-                    frame = int(query.get("frame", ["0"])[0])
-                    self.json_response(
-                        HTTPStatus.OK,
-                        {"tactile": self.app.tactile.frame(rollout_id, camera, frame)},
-                    )
-                    return
-                if resource == "sprite":
-                    frame = int(query.get("frame", ["0"])[0])
-                    kind = str(query.get("kind", ["deform"])[0] or "deform")
-                    self.serve_png(self.app.tactile.sprite(rollout_id, camera, frame, kind))
-                    return
-                if resource == "image":
-                    finger = str(query.get("finger", [""])[0] or "")
-                    event_id = str(query.get("event_id", [""])[0] or "")
-                    kind = str(query.get("kind", ["deform"])[0] or "deform")
-                    self.serve_png(self.app.tactile.image(rollout_id, finger, event_id, kind))
-                    return
-                self.json_error(HTTPStatus.NOT_FOUND, "Tactile resource not found")
+                self._route_tactile(parts[2], parts[3], query)
                 return
-
             if path in {"", "/"}:
+                self.serve_static(self.app.static_root / "index.html")
+                return
+            if path in {"/tactile", "/tactile/"}:
                 self.serve_static(self.app.static_root / "tactile" / "index.html")
                 return
-
             if path.startswith("/static/"):
                 relative = path[len("/static/"):]
                 target = (self.app.static_root / relative).resolve()
@@ -298,7 +635,34 @@ class TactileHandler(BaseHTTPRequestHandler):
                     return
                 self.serve_static(target)
                 return
+            self.json_error(HTTPStatus.NOT_FOUND, "Not found")
+        except KeyError as exc:
+            self.json_error(HTTPStatus.NOT_FOUND, str(exc.args[0]))
+        except (ValueError, json.JSONDecodeError) as exc:
+            self.json_error(HTTPStatus.BAD_REQUEST, str(exc))
+        except OSError as exc:
+            self.json_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
 
+    def do_POST(self) -> None:
+        parsed = urlparse(self.path)
+        path = unquote(parsed.path)
+        try:
+            payload = self._read_json_body()
+            if path == "/api/settings":
+                self.json_response(HTTPStatus.OK, {"settings": self.app.save_settings(payload)})
+                return
+            if path.startswith("/api/annotations/"):
+                rollout_id = path[len("/api/annotations/"):].strip("/")
+                events = self.app.save_rollout_annotations(rollout_id, payload.get("events"))
+                self.json_response(
+                    HTTPStatus.OK,
+                    {
+                        "rollout_id": rollout_id,
+                        "events": events,
+                        "annotation_target": str(self.app.annotation_target_path().relative_to(self.app.root)),
+                    },
+                )
+                return
             self.json_error(HTTPStatus.NOT_FOUND, "Not found")
         except KeyError as exc:
             self.json_error(HTTPStatus.NOT_FOUND, str(exc.args[0]))
@@ -318,8 +682,9 @@ def main() -> None:
     app = TactileApplication(args.root)
     handler = type("BoundTactileHandler", (TactileHandler,), {"app": app})
     server = ThreadingHTTPServer((args.host, args.port), handler)
-    print(f"LF3R tactile WebUI: http://{args.host}:{args.port}/", flush=True)
+    print(f"Tactile WebUI: http://{args.host}:{args.port}/", flush=True)
     print(f"Dataset manifest: {app.manifest_path}", flush=True)
+    print(f"Annotation target: {app.annotation_target_path()}", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

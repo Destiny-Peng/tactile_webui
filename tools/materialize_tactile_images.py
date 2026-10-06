@@ -7,8 +7,9 @@ Images are grouped by kind and finger so episode roots stay compact:
     tactile/images/raw/index/000123.png
 
 The filename is the per-finger sample_index from tactile/events.jsonl. Existing
-files are reused unless --overwrite is supplied. Only the Python standard
-library is required.
+files are reused unless --overwrite is supplied. A symlinked standalone
+manifest is supported: paths stored in the manifest are resolved against the
+original project tree, without copying the dataset payload.
 """
 
 from __future__ import annotations
@@ -31,9 +32,70 @@ KINDS = ("raw", "deform")
 def _project_file(root: Path, value: Any) -> Path:
     if not isinstance(value, str) or not value.strip():
         raise ValueError("missing project-relative path")
-    path = (root / value).resolve()
+    raw = Path(value).expanduser()
+    path = raw.resolve() if raw.is_absolute() else (root / raw).resolve()
     path.relative_to(root)
     return path
+
+
+def _manifest_references(manifest: Path, limit: int = 16) -> list[Path]:
+    references: list[Path] = []
+    with manifest.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            if not isinstance(row, dict):
+                continue
+            cameras = row.get("camera_video_paths")
+            if isinstance(cameras, dict):
+                for value in cameras.values():
+                    if isinstance(value, str) and value.strip() and not Path(value).expanduser().is_absolute():
+                        references.append(Path(value))
+            for key in ("synchronized_frames_path", "tactile_events_path"):
+                value = row.get(key)
+                if isinstance(value, str) and value.strip() and not Path(value).expanduser().is_absolute():
+                    references.append(Path(value))
+            streams = row.get("tactile_stream_paths")
+            if isinstance(streams, dict):
+                for entry in streams.values():
+                    if not isinstance(entry, dict):
+                        continue
+                    for value in entry.values():
+                        if isinstance(value, str) and value.strip() and not Path(value).expanduser().is_absolute():
+                            references.append(Path(value))
+            if len(references) >= limit:
+                break
+    return references[:limit]
+
+
+def infer_data_root(manifest: Path, fallback: Path) -> Path:
+    """Infer which project root the manifest's relative paths belong to."""
+    fallback = fallback.resolve()
+    manifest = manifest.resolve()
+    try:
+        references = _manifest_references(manifest)
+    except (OSError, json.JSONDecodeError):
+        return fallback
+    if not references:
+        return fallback
+
+    candidates = [fallback, *manifest.parents]
+    best_root = fallback
+    best_score = -1
+    seen: set[Path] = set()
+    for candidate in candidates:
+        candidate = candidate.resolve()
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        score = sum((candidate / value).exists() for value in references)
+        if score > best_score:
+            best_root = candidate
+            best_score = score
+        if score == len(references):
+            break
+    return best_root if best_score > 0 else fallback
 
 
 def _stream_paths(root: Path, row: dict[str, Any]) -> dict[str, dict[str, Path]]:
@@ -93,8 +155,9 @@ def _atomic_bytes(path: Path, content: bytes) -> None:
     try:
         with os.fdopen(fd, "wb") as handle:
             handle.write(content)
-            handle.flush()
-            os.fsync(handle.fileno())
+        # These PNGs are derived and fully regenerable. Atomic replacement is
+        # enough; fsync-per-image made large dataset preparation unnecessarily
+        # slow by forcing hundreds of thousands of synchronous flushes.
         os.replace(name, path)
     except BaseException:
         try:
@@ -161,14 +224,19 @@ def main() -> None:
     args = parser.parse_args()
 
     root = args.root.expanduser().resolve()
-    manifest = Path(args.manifest)
-    if not manifest.is_absolute():
-        manifest = (root / manifest).resolve()
-    manifest.relative_to(root)
+    manifest_entry = Path(args.manifest).expanduser()
+    if not manifest_entry.is_absolute():
+        manifest_entry = root / manifest_entry
+    if not manifest_entry.is_file():
+        raise FileNotFoundError(f"manifest not found: {manifest_entry}")
+    manifest = manifest_entry.resolve()
+    data_root = infer_data_root(manifest, root)
     kinds = tuple(dict.fromkeys(args.kinds))
     totals = {kind: 0 for kind in kinds}
     totals["skipped"] = 0
     rollouts = 0
+    print(f"[tactile-images] manifest={manifest}")
+    print(f"[tactile-images] data_root={data_root}")
     with manifest.open("r", encoding="utf-8") as handle:
         for line in handle:
             if not line.strip():
@@ -176,7 +244,7 @@ def main() -> None:
             row = json.loads(line)
             if not isinstance(row, dict) or not row.get("tactile_events_path"):
                 continue
-            summary = materialize_rollout(root, row, kinds, args.overwrite)
+            summary = materialize_rollout(data_root, row, kinds, args.overwrite)
             rollouts += 1
             for key, value in summary.items():
                 totals[key] = totals.get(key, 0) + value

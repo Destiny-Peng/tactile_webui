@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -25,33 +26,45 @@ class MonitoringAndResultsTests(unittest.TestCase):
             self.assertTrue(list((root / "logs" / "webui" / "server").glob("*.jsonl")))
             self.assertTrue(list((root / "logs" / "webui" / "client").glob("*.jsonl")))
 
+    @staticmethod
+    def _write_prediction_csv(path: Path, extra_a: bool = False) -> None:
+        fields = [
+            "rollout_id", "n", "step", "sample_frames", "sample_ticks",
+            "label", "prediction", "p_in_progress", "p_success", "p_failure",
+        ]
+        with path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=fields)
+            writer.writeheader()
+            writer.writerow({
+                "rollout_id": "ep_a", "n": 16, "step": 1,
+                "sample_frames": json.dumps(list(range(10, 26))),
+                "sample_ticks": json.dumps(list(range(16))),
+                "label": 0, "prediction": 2,
+                "p_in_progress": .1, "p_success": .2, "p_failure": .7,
+            })
+            writer.writerow({
+                "rollout_id": "ep_b", "n": 16, "step": 1,
+                "sample_frames": json.dumps(list(range(20, 36))),
+                "sample_ticks": json.dumps(list(range(16))),
+                "label": 1, "prediction": 1,
+                "p_in_progress": .1, "p_success": .8, "p_failure": .1,
+            })
+            if extra_a:
+                writer.writerow({
+                    "rollout_id": "ep_a", "n": 16, "step": 2,
+                    "sample_frames": json.dumps(list(range(11, 27))),
+                    "sample_ticks": json.dumps(list(range(16))),
+                    "label": 2, "prediction": 2,
+                    "p_in_progress": .1, "p_success": .1, "p_failure": .8,
+                })
+
     def test_online_results_reads_existing_prediction_csv(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             run = root / "outputs" / "align_online" / "runs" / "group" / "seed_42" / "f6_gru"
             run.mkdir(parents=True)
             path = run / "test_predictions.csv"
-            fields = [
-                "rollout_id", "n", "step", "sample_frames", "sample_ticks",
-                "label", "prediction", "p_in_progress", "p_success", "p_failure",
-            ]
-            with path.open("w", encoding="utf-8", newline="") as handle:
-                writer = csv.DictWriter(handle, fieldnames=fields)
-                writer.writeheader()
-                writer.writerow({
-                    "rollout_id": "ep_a", "n": 16, "step": 1,
-                    "sample_frames": json.dumps(list(range(10, 26))),
-                    "sample_ticks": json.dumps(list(range(16))),
-                    "label": 0, "prediction": 2,
-                    "p_in_progress": .1, "p_success": .2, "p_failure": .7,
-                })
-                writer.writerow({
-                    "rollout_id": "ep_b", "n": 16, "step": 1,
-                    "sample_frames": json.dumps(list(range(20, 36))),
-                    "sample_ticks": json.dumps(list(range(16))),
-                    "label": 1, "prediction": 1,
-                    "p_in_progress": .1, "p_success": .8, "p_failure": .1,
-                })
+            self._write_prediction_csv(path)
             service = OnlineResultsService(root)
             sources = service.list_sources("outputs")
             self.assertEqual(len(sources), 1)
@@ -62,6 +75,19 @@ class MonitoringAndResultsTests(unittest.TestCase):
             self.assertEqual(result["points"][0]["label"], 0)
             self.assertEqual(result["points"][0]["prediction"], 2)
             self.assertEqual(result["points"][0]["probabilities"], [0.1, 0.2, 0.7])
+
+            # A second rollout from the same source reuses one parsed source.
+            result_b = service.curve("outputs", sources[0]["id"], "ep_b")
+            self.assertEqual(len(result_b["points"]), 1)
+            self.assertEqual(len(service._source_cache), 1)
+
+            # Rewriting the CSV changes its signature and invalidates the cache.
+            self._write_prediction_csv(path, extra_a=True)
+            stat = path.stat()
+            os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000))
+            refreshed = service.curve("outputs", sources[0]["id"], "ep_a")
+            self.assertEqual(len(refreshed["points"]), 2)
+            self.assertEqual(refreshed["points"][-1]["frame"], 26)
 
 
 if __name__ == "__main__":

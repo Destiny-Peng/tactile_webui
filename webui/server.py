@@ -530,14 +530,19 @@ class TactileApplication:
             "dataset_manifest.json",
         }
         found: dict[Path, set[str]] = defaultdict(set)
-        for marker in markers:
-            for path in root.glob(f"**/{marker}"):
-                if not path.is_file():
-                    continue
-                relative = path.parent.relative_to(root)
-                if len(relative.parts) > 4:
-                    continue
-                found[path.parent].add(marker)
+        # One bounded traversal instead of one recursive glob per marker.
+        for current, directories, filenames in os.walk(root):
+            directory = Path(current)
+            relative = directory.relative_to(root)
+            depth = len(relative.parts)
+            if depth > 4:
+                directories[:] = []
+                continue
+            matched = markers.intersection(filenames)
+            if matched:
+                found[directory].update(matched)
+            if depth >= 4:
+                directories[:] = []
         rows: list[dict[str, Any]] = []
         for directory, names in found.items():
             stat = directory.stat()
@@ -555,7 +560,7 @@ class TactileApplication:
 
 class TactileHandler(BaseHTTPRequestHandler):
     app: TactileApplication
-    protocol_version = "HTTP/1.0"
+    protocol_version = "HTTP/1.1"
     server_version = "TactileWebUI/2.0"
 
     CLIENT_DISCONNECT_ERRORS = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)
@@ -576,28 +581,34 @@ class TactileHandler(BaseHTTPRequestHandler):
         self._request_status = int(code)
         super().send_response(code, message)
 
+    def _record_request(self) -> None:
+        started = getattr(self, "_request_started", None)
+        if started is None or getattr(self, "_request_recorded", False):
+            return
+        self._request_recorded = True
+        try:
+            self.app.monitor.record_request(
+                method=getattr(self, "_request_method", "?"),
+                path=getattr(self, "_request_path", "?"),
+                status=getattr(self, "_request_status", 500),
+                resource=getattr(self, "_request_resource", "other"),
+                duration_ms=round((time.perf_counter() - started) * 1000.0, 3),
+                response_bytes=getattr(self, "_response_bytes", None),
+                client_disconnected=bool(getattr(self, "_client_disconnected", False)),
+                range=getattr(self, "_video_range", None),
+                video_total_bytes=getattr(self, "_video_total_bytes", None),
+            )
+        except OSError:
+            pass
+
     def finish(self) -> None:
         try:
             super().finish()
         finally:
-            started = getattr(self, "_request_started", None)
-            if started is None or getattr(self, "_request_recorded", False):
-                return
-            self._request_recorded = True
-            try:
-                self.app.monitor.record_request(
-                    method=getattr(self, "_request_method", "?"),
-                    path=getattr(self, "_request_path", "?"),
-                    status=getattr(self, "_request_status", 500),
-                    resource=getattr(self, "_request_resource", "other"),
-                    duration_ms=round((time.perf_counter() - started) * 1000.0, 3),
-                    response_bytes=getattr(self, "_response_bytes", None),
-                    client_disconnected=bool(getattr(self, "_client_disconnected", False)),
-                    range=getattr(self, "_video_range", None),
-                    video_total_bytes=getattr(self, "_video_total_bytes", None),
-                )
-            except OSError:
-                pass
+            # Safety net for a request that escaped before do_GET/do_POST's
+            # finally block. With HTTP/1.1 this method runs per connection, not
+            # per request, so normal accounting is done in the request methods.
+            self._record_request()
 
     def log_message(self, format: str, *args: Any) -> None:
         # Structured request logging is handled by WebUIMonitor in finish().
@@ -613,11 +624,11 @@ class TactileHandler(BaseHTTPRequestHandler):
             return False
 
     def _finish_headers(self) -> bool:
-        self.close_connection = True
         try:
             self.end_headers()
             return True
         except self.CLIENT_DISCONNECT_ERRORS:
+            self.close_connection = True
             self._client_disconnected = True
             return False
 
@@ -641,7 +652,6 @@ class TactileHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
-        self.send_header("Connection", "close")
         if self._finish_headers():
             self._safe_write(body)
 
@@ -662,7 +672,6 @@ class TactileHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-cache")
-        self.send_header("Connection", "close")
         if self._finish_headers():
             self._safe_write(body)
 
@@ -672,8 +681,7 @@ class TactileHandler(BaseHTTPRequestHandler):
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "image/png")
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "private, max-age=3600")
-        self.send_header("Connection", "close")
+        self.send_header("Cache-Control", "private, max-age=86400, immutable")
         if self._finish_headers():
             self._safe_write(body)
 
@@ -713,7 +721,6 @@ class TactileHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(length))
         if status == HTTPStatus.PARTIAL_CONTENT:
             self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
-        self.send_header("Connection", "close")
         if not self._finish_headers():
             return
         with path.open("rb") as handle:
@@ -884,6 +891,8 @@ class TactileHandler(BaseHTTPRequestHandler):
             self.json_error(HTTPStatus.BAD_REQUEST, str(exc))
         except OSError as exc:
             self.json_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+        finally:
+            self._record_request()
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
@@ -920,6 +929,8 @@ class TactileHandler(BaseHTTPRequestHandler):
             self.json_error(HTTPStatus.BAD_REQUEST, str(exc))
         except OSError as exc:
             self.json_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+        finally:
+            self._record_request()
 
 
 def main() -> None:

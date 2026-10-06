@@ -38,52 +38,69 @@ class WebUIMonitor:
     def _daily_path(directory: Path) -> Path:
         return directory / f"{datetime.now().astimezone().date().isoformat()}.jsonl"
 
-    def _append(self, directory: Path, payload: dict[str, Any]) -> None:
+    def _append_many(self, directory: Path, rows: list[dict[str, Any]]) -> None:
+        if not rows:
+            return
         path = self._daily_path(directory)
-        line = json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n"
+        payload = "".join(
+            json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n"
+            for row in rows
+        )
         with path.open("a", encoding="utf-8") as handle:
-            handle.write(line)
+            handle.write(payload)
+
+    def _append(self, directory: Path, payload: dict[str, Any]) -> None:
+        self._append_many(directory, [payload])
 
     def record_request(self, **payload: Any) -> None:
         row = {"ts": self._now(), "kind": "http", **payload}
         status = int(row.get("status") or 0)
         duration = float(row.get("duration_ms") or 0.0)
         resource = str(row.get("resource") or "other")
+        path = str(row.get("path") or "")
         with self._lock:
             self._request_sequence += 1
+            request_sequence = self._request_sequence
             self._recent.append(row)
             persist = (
                 status >= 400
                 or bool(row.get("client_disconnected"))
-                or resource in {"video", "api"}
+                or resource == "video"
+                or (resource == "api" and path != "/api/telemetry")
                 or duration >= 250.0
-                or (resource == "tactile" and self._request_sequence % 50 == 0)
+                or (resource == "tactile" and request_sequence % 50 == 0)
             )
-            if persist:
-                self._append(self.server_dir, row)
+        # Never hold the shared monitor lock across filesystem I/O. Under image
+        # load bursts that lock used to serialize otherwise independent request
+        # threads and could make the monitor itself visible in latency traces.
+        if persist:
+            self._append(self.server_dir, row)
 
     def record_server_event(self, event: str, **payload: Any) -> None:
         row = {"ts": self._now(), "kind": "server", "event": event, **payload}
         with self._lock:
             self._recent.append(row)
-            self._append(self.server_dir, row)
+        self._append(self.server_dir, row)
 
     def record_client_events(self, events: list[dict[str, Any]]) -> int:
-        accepted = 0
+        rows: list[dict[str, Any]] = []
+        persisted: list[dict[str, Any]] = []
+        for raw in events[:200]:
+            if not isinstance(raw, dict):
+                continue
+            row = {"ts_server": self._now(), "kind": "client", **raw}
+            rows.append(row)
+            event = str(row.get("event") or "")
+            level = str(row.get("level") or "info")
+            # Successful high-rate tactile resource timing is sampled on the
+            # client before upload. Persist every uploaded diagnostic event.
+            if level == "error" or event or row.get("duration_ms") is not None:
+                persisted.append(row)
         with self._lock:
-            for raw in events[:200]:
-                if not isinstance(raw, dict):
-                    continue
-                row = {"ts_server": self._now(), "kind": "client", **raw}
-                self._client_recent.append(row)
-                event = str(row.get("event") or "")
-                level = str(row.get("level") or "info")
-                # Successful high-rate tactile resource timing is sampled on
-                # the client before upload. Persist every uploaded event here.
-                if level == "error" or event or row.get("duration_ms") is not None:
-                    self._append(self.client_dir, row)
-                accepted += 1
-        return accepted
+            self._client_recent.extend(rows)
+        # One append/open per telemetry batch instead of one per event.
+        self._append_many(self.client_dir, persisted)
+        return len(rows)
 
     @staticmethod
     def _percentile(values: list[float], fraction: float) -> float | None:
@@ -111,7 +128,7 @@ class WebUIMonitor:
         errors = [row for row in requests if int(row.get("status") or 0) >= 400 or row.get("client_disconnected")]
         client_errors = [
             row for row in client_recent
-            if row.get("level") == "error" or row.get("event") in {"error", "stalled", "watchdog_timeout", "network_error"}
+            if row.get("level") == "error" or row.get("event") in {"error", "stalled", "watchdog_timeout", "network_error", "tactile_image_error"}
         ]
         by_resource = {
             resource: self._latency([row for row in requests if row.get("resource") == resource])

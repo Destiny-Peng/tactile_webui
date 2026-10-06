@@ -68,8 +68,9 @@ class TactileApplication:
         if not source.is_absolute():
             source = self.root / source
         self.source_root = source.resolve()
+
         dataset_root = self.source_root / "datasets" / "failrecovery"
-        manifest = dataset_root / "manifest.jsonl"
+        manifest_entry = dataset_root / "manifest.jsonl"
         transitional_manifest = (
             self.source_root
             / "datasets"
@@ -83,17 +84,87 @@ class TactileApplication:
             / "v1"
             / "failrecovery_manifest.jsonl"
         )
-        # New standalone layout is dataset-centric. The two old paths are
-        # read-only compatibility inputs for repositories not migrated yet.
-        if manifest.is_file():
-            self.manifest_path = manifest
+
+        # The canonical standalone layout may keep manifest.jsonl as a symlink
+        # into the original LF3R repository. Resolve that link, then infer the
+        # root that the manifest's historical project-relative paths belong to.
+        if manifest_entry.is_file():
+            self.manifest_path = manifest_entry.resolve()
         elif transitional_manifest.is_file():
-            self.manifest_path = transitional_manifest
+            self.manifest_path = transitional_manifest.resolve()
         else:
-            self.manifest_path = legacy_manifest
-        self.tactile = FailRecoveryTactileService(self.source_root, self.manifest_path)
+            self.manifest_path = legacy_manifest.resolve()
+
+        self.data_root = self._infer_manifest_data_root(
+            self.manifest_path,
+            fallback=self.source_root,
+        )
+        self.tactile = FailRecoveryTactileService(self.data_root, self.manifest_path)
         self._rollouts = None
         self._rollout_map = None
+
+    @classmethod
+    def _infer_manifest_data_root(cls, manifest_path: Path, fallback: Path) -> Path:
+        fallback = fallback.resolve()
+        if not manifest_path.is_file():
+            return fallback
+
+        references: list[str] = []
+        try:
+            with manifest_path.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    if not line.strip():
+                        continue
+                    row = json.loads(line)
+                    if not isinstance(row, dict):
+                        continue
+                    cameras = row.get("camera_video_paths")
+                    if isinstance(cameras, dict):
+                        references.extend(
+                            value for value in cameras.values()
+                            if isinstance(value, str) and value.strip()
+                        )
+                    for key in ("synchronized_frames_path", "tactile_events_path"):
+                        value = row.get(key)
+                        if isinstance(value, str) and value.strip():
+                            references.append(value)
+                    streams = row.get("tactile_stream_paths")
+                    if isinstance(streams, dict):
+                        for entry in streams.values():
+                            if isinstance(entry, dict):
+                                references.extend(
+                                    value for value in entry.values()
+                                    if isinstance(value, str) and value.strip()
+                                )
+                    if len(references) >= 12:
+                        break
+        except (OSError, json.JSONDecodeError):
+            return fallback
+
+        relative_references = [
+            Path(value)
+            for value in references
+            if not Path(value).expanduser().is_absolute()
+        ]
+        if not relative_references:
+            return fallback
+
+        candidates = [fallback, *manifest_path.resolve().parents]
+        best_root = fallback
+        best_score = -1
+        seen: set[Path] = set()
+        for candidate in candidates:
+            candidate = candidate.resolve()
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            score = sum((candidate / value).exists() for value in relative_references)
+            if score > best_score:
+                best_root = candidate
+                best_score = score
+            if score == len(relative_references):
+                break
+        return best_root if best_score > 0 else fallback
 
     @staticmethod
     def _display_path(path: Path, base: Path) -> str:
@@ -118,11 +189,11 @@ class TactileApplication:
         if not isinstance(value, str) or not value.strip():
             raise ValueError("missing source-project-relative path")
         raw = Path(value).expanduser()
-        path = raw.resolve() if raw.is_absolute() else (self.source_root / raw).resolve()
+        path = raw.resolve() if raw.is_absolute() else (self.data_root / raw).resolve()
         try:
-            path.relative_to(self.source_root)
+            path.relative_to(self.data_root)
         except ValueError as exc:
-            raise ValueError("source data path escapes source project root") from exc
+            raise ValueError("source data path escapes resolved data root") from exc
         if suffix and path.suffix.lower() != suffix.lower():
             raise ValueError(f"expected {suffix} file")
         return path
@@ -219,7 +290,7 @@ class TactileApplication:
         if self.manifest_path.is_file():
             for value in self._read_jsonl(self.manifest_path):
                 row = dict(value)
-                row.setdefault("manifest_source", self._display_path(self.manifest_path, self.source_root))
+                row.setdefault("manifest_source", self._display_path(self.manifest_path, self.data_root))
                 row.setdefault("manifest_label", "failrecovery")
                 row.setdefault("source_kind", "real_robot")
                 row.setdefault("task_description", row.get("instruction") or row.get("task_key") or "Tactile task")
@@ -249,7 +320,7 @@ class TactileApplication:
     def annotation_seed_path(self) -> Path | None:
         pattern = str(self._settings["annotation_seed_glob"])
         candidates = sorted(
-            (path for path in self.source_root.glob(pattern) if path.is_file()),
+            (path for path in self.data_root.glob(pattern) if path.is_file()),
             key=lambda path: (path.stat().st_mtime_ns, str(path)),
         )
         return candidates[-1] if candidates else None

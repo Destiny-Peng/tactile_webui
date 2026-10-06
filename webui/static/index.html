@@ -1,178 +1,191 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-appearance="light">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Tactile WebUI</title>
-  <meta name="description" content="Standalone SHARPA tactile annotation and experiment workspace">
+  <meta name="description" content="Fail-recovery tactile annotation and online detection review workspace">
   <link rel="stylesheet" href="/static/shell.css">
   <script src="/static/shell.js" defer></script>
 </head>
-<body>
-  <aside class="sidebar">
-    <div class="brand-block">
+<body data-view="annotate">
+  <header class="topbar">
+    <div class="brand">
       <div class="brand-mark">T</div>
       <div>
-        <div class="eyebrow">SHARPA</div>
-        <div class="brand-title">Tactile WebUI</div>
+        <p class="eyebrow">FAILRECOVERY</p>
+        <h1>Tactile WebUI</h1>
       </div>
     </div>
-    <nav class="nav" aria-label="Workspace">
+    <nav class="page-navigation" aria-label="Workspace">
       <button class="nav-item active" data-view="annotate" type="button">Annotate</button>
       <button class="nav-item" data-view="results" type="button">Results</button>
       <button class="nav-item" data-view="runs" type="button">Runs</button>
       <button class="nav-item" data-view="analysis" type="button">Analysis</button>
       <button class="nav-item" data-view="settings" type="button">Settings</button>
     </nav>
-    <div class="sidebar-footer">
+    <div class="dataset-summary">
       <span id="globalStatus" class="status-dot"></span>
       <span id="globalStatusText">Connecting…</span>
+      <span class="summary-divider"></span>
+      <span id="datasetStatus">Loading dataset…</span>
+      <span class="summary-divider"></span>
+      <span id="annotationStatus">Annotations</span>
     </div>
-  </aside>
+  </header>
 
-  <main class="workspace">
-    <header class="workspace-header">
-      <div>
-        <p class="eyebrow">TACTILE DATA OPERATIONS</p>
-        <h1 id="pageTitle">Annotate</h1>
-      </div>
-      <div class="header-meta">
-        <span id="datasetStatus" class="pill">Loading dataset…</span>
-        <span id="annotationStatus" class="pill subtle">Annotations</span>
-      </div>
-    </header>
-
+  <main class="workspace-shell">
     <section id="view-annotate" class="view active-view">
-      <div class="annotate-layout">
-        <aside class="panel catalog-panel">
-          <div class="panel-heading compact-heading">
+      <div class="review-workspace">
+        <aside class="queue-panel">
+          <div class="panel-heading">
             <div><p class="eyebrow">DATASET</p><h2>Rollouts</h2></div>
             <span id="annotateVisibleCount" class="count-chip">0</span>
           </div>
-          <input id="annotateSearch" class="text-input" type="search" placeholder="Search rollout or task…" autocomplete="off">
-          <div class="filter-row">
-            <select id="annotateTaskFilter" class="select-input"><option value="all">All tasks</option></select>
-            <select id="annotateReviewFilter" class="select-input">
-              <option value="all">All review states</option>
-              <option value="complete">Complete</option>
-              <option value="unreviewed">Unreviewed</option>
-            </select>
+          <label class="search-box"><span class="sr-only">Search rollouts</span><input id="annotateSearch" type="search" placeholder="Search rollout or task…" autocomplete="off"></label>
+          <div class="filter-grid">
+            <label><span>Task</span><select id="annotateTaskFilter"><option value="all">All tasks</option></select></label>
+            <label><span>Review</span><select id="annotateReviewFilter"><option value="all">All</option><option value="complete">Complete</option><option value="unreviewed">Unreviewed</option></select></label>
           </div>
           <div id="annotateRolloutList" class="rollout-list"></div>
         </aside>
 
-        <section class="annotate-main">
-          <div id="annotateEmpty" class="empty-card">
+        <section class="review-stage">
+          <div id="annotateEmpty" class="empty-state">
             <p class="eyebrow">ANNOTATE</p>
             <h2>Select a tactile rollout.</h2>
-            <p>The annotation schema is limited to Align/Insert × failure/success intervals (keys 6–9).</p>
+            <p>Use labels 6–9. The timeline is the primary annotation surface.</p>
           </div>
 
-          <div id="annotateContent" class="hidden">
-            <section class="record-strip panel">
-              <div>
-                <div id="annotateBadges" class="badge-row"></div>
-                <h2 id="annotateTaskTitle">Task</h2>
-                <p id="annotateRecordMeta" class="muted"></p>
-              </div>
-              <div class="row-actions">
-                <button id="annotatePrevious" class="button secondary" type="button">← Previous</button>
-                <button id="annotateNext" class="button secondary" type="button">Next →</button>
-              </div>
-            </section>
+          <div id="annotateContent" class="review-content hidden">
+            <div class="media-column">
+              <section class="task-header">
+                <div>
+                  <div id="annotateBadges" class="badge-row"></div>
+                  <h2 id="annotateTaskTitle">Task</h2>
+                  <p id="annotateRecordMeta" class="record-meta"></p>
+                </div>
+                <div class="navigation-actions">
+                  <button id="annotatePrevious" class="ghost-button" type="button">← Previous</button>
+                  <button id="annotateNext" class="ghost-button" type="button">Next →</button>
+                </div>
+              </section>
 
-            <section class="panel video-panel">
-              <div class="toolbar">
-                <label>Camera <select id="annotateCamera" class="select-input"></select></label>
+              <section class="video-view-controls">
+                <label class="compact-field"><span>Camera</span><select id="annotateCamera"></select></label>
                 <span id="annotateFrameText" class="mono">Frame 0 / 0</span>
                 <span id="annotateTimeText" class="mono">00:00.000</span>
-              </div>
-              <div class="video-shell"><video id="annotateVideo" preload="metadata" playsinline></video></div>
-              <div class="transport-row">
-                <button id="annotatePlay" class="button primary" type="button">Play</button>
-                <button id="annotateStepBack" class="button secondary" type="button">−1 frame</button>
-                <button id="annotateStepForward" class="button secondary" type="button">+1 frame</button>
-                <input id="annotateFrameSlider" class="frame-slider" type="range" min="0" max="1" step="1" value="0">
-              </div>
-              <div class="annotate-tactile-preview">
-                <div>
-                  <p class="eyebrow">CURRENT TACTILE FRAME</p>
-                  <span id="annotateTactileStatus" class="muted">Waiting for synchronized tactile…</span>
-                </div>
-                <img id="annotateTactileSprite" alt="Five-finger deform tactile sprite">
-              </div>
-            </section>
+                <span id="annotateVideoHealth" class="health-pill idle">Video idle</span>
+              </section>
 
-            <section class="panel interval-panel">
-              <div class="panel-heading">
-                <div><p class="eyebrow">INTERVAL ANNOTATION</p><h2>Align / Insert events</h2></div>
-                <div class="row-actions">
-                  <button id="addInterval" class="button secondary" type="button">+ Add event</button>
-                  <button id="saveIntervals" class="button primary" type="button">Save</button>
-                </div>
+              <div class="video-shell"><video id="annotateVideo" preload="metadata" playsinline></video></div>
+              <div class="transport">
+                <button id="annotatePlay" class="transport-main" type="button">Play</button>
+                <button id="annotateStepBack" type="button">−1 frame</button>
+                <button id="annotateStepForward" type="button">+1 frame</button>
               </div>
-              <div class="shortcut-note">1–4 select type · Q set start · W set end · ↑/↓ active event · ,/. rollout · Space play</div>
+
+              <section class="timeline-card">
+                <div class="timeline-heading">
+                  <div><p class="eyebrow">PRECISE TIMELINE</p><strong>Annotation intervals</strong></div>
+                  <span class="timeline-help">Click to seek · click a band to select</span>
+                </div>
+                <div id="annotateTimeline" class="precision-timeline" aria-label="Annotation timeline"></div>
+                <input id="annotateFrameSlider" class="precision-slider" type="range" min="0" max="1" step="1" value="0" aria-label="Video frame">
+              </section>
+
+              <section class="tactile-preview-card">
+                <div><p class="eyebrow">CURRENT TACTILE FRAME</p><span id="annotateTactileStatus" class="muted">Waiting for synchronized tactile…</span></div>
+                <img id="annotateTactileSprite" alt="Five-finger tactile sprite">
+              </section>
+            </div>
+
+            <aside class="annotation-panel">
+              <div class="annotation-panel-header">
+                <div><p class="eyebrow">INTERVAL ANNOTATION</p><h2>Labels</h2></div>
+                <span class="count-chip">6–9</span>
+              </div>
+              <div class="shortcut-grid">
+                <span><kbd>1–4</kbd> label</span><span><kbd>Q</kbd> start</span><span><kbd>W</kbd> end</span>
+                <span><kbd>↑/↓</kbd> interval</span><span><kbd>, / .</kbd> rollout</span><span><kbd>Space</kbd> play</span>
+              </div>
+              <div class="annotation-actions"><button id="addInterval" class="ghost-button" type="button">+ Add interval</button><button id="saveIntervals" class="save-button" type="button">Save</button></div>
               <div id="intervalList" class="interval-list"></div>
               <div id="annotationMessage" class="message"></div>
-            </section>
+            </aside>
           </div>
         </section>
       </div>
     </section>
 
     <section id="view-results" class="view">
-      <div class="results-frame-wrap">
-        <iframe id="resultsFrame" title="Tactile Results" src="/static/tactile/index.html?embedded=1"></iframe>
+      <div class="results-workspace">
+        <section class="results-toolbar">
+          <div><p class="eyebrow">ONLINE DETECTION</p><h2>Video / GT / prediction review</h2></div>
+          <div class="results-controls">
+            <label><span>Model output</span><select id="resultsSource"><option value="">No source</option></select></label>
+            <label><span>Rollout</span><select id="resultsRollout"><option value="">Select rollout</option></select></label>
+            <label><span>Camera</span><select id="resultsCamera"></select></label>
+            <button id="refreshResults" class="ghost-button" type="button">Refresh</button>
+          </div>
+        </section>
+        <div id="resultsEmpty" class="empty-state compact-empty"><h2>Select an online result source and rollout.</h2><p>Prediction sources are discovered from existing <code>test_predictions.csv</code> outputs.</p></div>
+        <div id="resultsContent" class="results-grid hidden">
+          <section class="results-video-column">
+            <div class="results-meta"><div><h2 id="resultsTaskTitle">Task</h2><p id="resultsRecordMeta" class="record-meta"></p></div><span id="resultsVideoHealth" class="health-pill idle">Video idle</span></div>
+            <div class="video-shell"><video id="resultsVideo" preload="metadata" playsinline></video></div>
+            <div class="transport"><button id="resultsPlay" class="transport-main" type="button">Play</button><button id="resultsStepBack" type="button">−1 frame</button><button id="resultsStepForward" type="button">+1 frame</button><span id="resultsFrameText" class="mono">Frame 0 / 0</span></div>
+            <section class="timeline-card results-timeline-card"><div class="timeline-heading"><div><p class="eyebrow">ANNOTATION</p><strong>Saved intervals</strong></div></div><div id="resultsAnnotationTimeline" class="precision-timeline compact-timeline"></div><input id="resultsFrameSlider" class="precision-slider" type="range" min="0" max="1" step="1" value="0"></section>
+          </section>
+          <section class="detection-panel">
+            <div class="panel-heading"><div><p class="eyebrow">MODEL OUTPUT</p><h2>Online curve</h2></div><span id="resultsPointCount" class="count-chip">0</span></div>
+            <div id="resultsCurve" class="curve-shell"><svg viewBox="0 0 1000 360" preserveAspectRatio="none" aria-label="Probability curves"></svg></div>
+            <div class="curve-legend"><span><i class="curve-key p0"></i>p0</span><span><i class="curve-key p1"></i>p1</span><span><i class="curve-key p2"></i>p2</span><span class="curve-current">frame <b id="resultsCurveFrame">0</b></span></div>
+            <div class="label-track-card"><div class="label-track-title"><span>GT label</span><span id="resultsGtReadout" class="mono">—</span></div><div id="resultsGtTrack" class="label-track"></div></div>
+            <div class="label-track-card"><div class="label-track-title"><span>Predicted label</span><span id="resultsPredReadout" class="mono">—</span></div><div id="resultsPredTrack" class="label-track"></div></div>
+            <div id="resultsMessage" class="message"></div>
+          </section>
+        </div>
       </div>
     </section>
 
-    <section id="view-runs" class="view">
-      <section class="panel page-panel">
-        <div class="panel-heading">
-          <div><p class="eyebrow">SHARPA EXPERIMENTS</p><h2>Runs</h2></div>
-          <button id="refreshRuns" class="button secondary" type="button">Refresh</button>
-        </div>
-        <p class="muted">This page only scans standalone tactile outputs. LIBERO, repair and baseline jobs are intentionally absent.</p>
-        <div class="command-card"><code>bash tools/run_sharpa_tactile_ablation.sh &lt;module&gt; [arguments…]</code></div>
-        <div id="runsRoot" class="source-line"></div>
-        <div id="runsList" class="runs-list"></div>
-      </section>
+    <section id="view-runs" class="view page-view">
+      <section class="surface-card page-card"><div class="panel-heading"><div><p class="eyebrow">SHARPA EXPERIMENTS</p><h2>Runs</h2></div><button id="refreshRuns" class="ghost-button" type="button">Refresh</button></div><p class="muted">Standalone tactile outputs only.</p><div class="command-card"><code>bash tools/run_sharpa_tactile_ablation.sh &lt;module&gt; [arguments…]</code></div><div id="runsRoot" class="source-line"></div><div id="runsList" class="runs-list"></div></section>
     </section>
 
-    <section id="view-analysis" class="view">
+    <section id="view-analysis" class="view page-view">
       <div id="analysisCards" class="metric-grid"></div>
-      <section class="panel page-panel">
-        <div class="panel-heading">
-          <div><p class="eyebrow">EVENT DISTRIBUTION</p><h2>Four tactile interval types</h2></div>
-          <button id="refreshAnalysis" class="button secondary" type="button">Refresh</button>
-        </div>
-        <div id="eventAnalysisTable"></div>
-      </section>
-      <section class="panel page-panel">
-        <div class="panel-heading"><div><p class="eyebrow">COVERAGE</p><h2>By task</h2></div></div>
-        <div id="taskAnalysisTable"></div>
-      </section>
+      <section class="surface-card page-card"><div class="panel-heading"><div><p class="eyebrow">LABEL DISTRIBUTION</p><h2>Intervals</h2></div><button id="refreshAnalysis" class="ghost-button" type="button">Refresh</button></div><div id="eventAnalysisTable"></div></section>
+      <section class="surface-card page-card"><div class="panel-heading"><div><p class="eyebrow">COVERAGE</p><h2>By task</h2></div></div><div id="taskAnalysisTable"></div></section>
     </section>
 
-    <section id="view-settings" class="view">
-      <section class="panel settings-panel">
-        <div class="panel-heading"><div><p class="eyebrow">WORKSPACE</p><h2>Settings</h2></div></div>
-        <form id="settingsForm">
-          <div class="settings-grid">
-            <label class="field"><span>Source project root</span><input id="settingsSourceRoot" class="text-input" name="source_project_root" placeholder="/path/to/original/project"></label>
-            <label class="field"><span>Dataset manifest</span><input id="settingsManifest" class="text-input" readonly></label>
-            <label class="field"><span>Annotation records directory</span><input id="settingsAnnotations" class="text-input" name="annotations_path"></label>
-            <label class="field"><span>Historical annotation seed glob</span><input id="settingsSeedGlob" class="text-input" name="annotation_seed_glob"></label>
-            <label class="field"><span>Runs root</span><input id="settingsRunsRoot" class="text-input" name="runs_root"></label>
-            <label class="field"><span>Default camera</span><input id="settingsCamera" class="text-input" name="default_camera"></label>
-            <label class="field"><span>Default tactile image</span><select id="settingsKind" class="select-input" name="default_tactile_kind"><option value="deform">Deform</option><option value="raw">Raw</option></select></label>
-            <label class="field"><span>Theme</span><select id="settingsTheme" class="select-input" name="theme"><option value="light">Light</option><option value="dark">Dark</option></select></label>
-          </div>
-          <div class="settings-source"><strong>Currently loaded annotation source:</strong> <span id="settingsSource">None</span></div>
-          <div class="row-actions"><button class="button primary" type="submit">Save settings</button></div>
-          <div id="settingsMessage" class="message"></div>
-        </form>
-      </section>
+    <section id="view-settings" class="view page-view">
+      <div class="settings-columns">
+        <section class="surface-card settings-panel">
+          <div class="panel-heading"><div><p class="eyebrow">WORKSPACE</p><h2>Settings</h2></div></div>
+          <form id="settingsForm">
+            <div class="settings-grid">
+              <label class="field"><span>Source project root</span><input id="settingsSourceRoot" name="source_project_root"></label>
+              <label class="field"><span>Dataset manifest</span><input id="settingsManifest" readonly></label>
+              <label class="field"><span>Annotation records directory</span><input id="settingsAnnotations" name="annotations_path"></label>
+              <label class="field"><span>Historical annotation seed glob</span><input id="settingsSeedGlob" name="annotation_seed_glob"></label>
+              <label class="field"><span>Runs root</span><input id="settingsRunsRoot" name="runs_root"></label>
+              <label class="field"><span>Default camera</span><input id="settingsCamera" name="default_camera"></label>
+              <label class="field"><span>Default tactile image</span><select id="settingsKind" name="default_tactile_kind"><option value="deform">Deform</option><option value="raw">Raw</option></select></label>
+              <label class="field"><span>Theme</span><select id="settingsTheme" name="theme"><option value="light">Light</option><option value="dark">Dark</option></select></label>
+            </div>
+            <div class="settings-source"><strong>Loaded annotation source:</strong> <span id="settingsSource">None</span></div>
+            <div class="annotation-actions"><button class="save-button" type="submit">Save settings</button></div><div id="settingsMessage" class="message"></div>
+          </form>
+        </section>
+        <section class="surface-card diagnostics-panel">
+          <div class="panel-heading"><div><p class="eyebrow">STABILITY / PERFORMANCE</p><h2>Diagnostics</h2></div><button id="refreshDiagnostics" class="ghost-button" type="button">Refresh</button></div>
+          <div id="diagnosticKpis" class="diagnostic-kpis"></div>
+          <div class="diagnostic-section"><strong>Current video</strong><div id="diagnosticVideo" class="diagnostic-log muted">No video selected.</div></div>
+          <div class="diagnostic-section"><strong>Recent errors / stalls</strong><div id="diagnosticErrors" class="diagnostic-log muted">None.</div></div>
+          <div class="diagnostic-section"><strong>Log directories</strong><div id="diagnosticPaths" class="diagnostic-log mono">Loading…</div></div>
+        </section>
+      </div>
     </section>
   </main>
 </body>

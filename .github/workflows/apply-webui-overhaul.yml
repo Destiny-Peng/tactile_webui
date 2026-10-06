@@ -50,7 +50,8 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add .gitignore .github/workflows/validate-tactile-webui.yml webui/static/shell.css webui/server.py
+          git checkout -- .github/workflows/validate-tactile-webui.yml
+          git add .gitignore webui/static/shell.css webui/server.py
           if git diff --cached --quiet; then
             echo 'No generated changes.'
           else

@@ -12,7 +12,7 @@ class WorkspaceAnnotationTest(unittest.TestCase):
     def make_app(self):
         temporary = tempfile.TemporaryDirectory()
         root = Path(temporary.name)
-        manifest = root / "datasets/lf3r_failure_rollouts/failrecovery_manifest.jsonl"
+        manifest = root / "datasets/failrecovery/manifest.jsonl"
         manifest.parent.mkdir(parents=True)
         manifest.write_text(
             json.dumps(
@@ -47,7 +47,7 @@ class WorkspaceAnnotationTest(unittest.TestCase):
             ["align_failure", "insert_failure", "align_success", "insert_success"],
         )
         self.assertEqual(len(app.annotations_by_rollout()["usb_001"]), 4)
-        self.assertEqual(app.annotation_target_path(), app.root / "annotations/failure_annotations/records")
+        self.assertEqual(app.annotation_target_path(), app.root / "annotations/failrecovery/records")
         self.assertTrue(app.annotation_record_path("usb_001").is_file())
         record = json.loads(app.annotation_record_path("usb_001").read_text())
         self.assertEqual([row["event_key"] for row in record["tactile_intervals"]], [6, 7, 8, 9])
@@ -55,7 +55,7 @@ class WorkspaceAnnotationTest(unittest.TestCase):
     def test_existing_lf3r_record_is_not_overwritten(self):
         temporary, app = self.make_app()
         self.addCleanup(temporary.cleanup)
-        records = app.root / "annotations/failure_annotations/records"
+        records = app.root / "annotations/failrecovery/records"
         records.mkdir(parents=True)
         legacy = records / "usb_001.json"
         legacy.write_text(json.dumps({"schema_version": 2, "rollout_id": "usb_001", "notes": "keep me"}))

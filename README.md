@@ -44,15 +44,15 @@ The WebUI and SHARPA scripts retain the fail-recovery layout used by the dissert
 
 ```text
 datasets/
-  lf3r_failure_rollouts/
-    failrecovery_manifest.jsonl
+  failrecovery/
+    manifest.jsonl
     failrecovery/
     ...
 ```
 
 Manifest entries use the exported fields `camera_video_paths`, `synchronized_frames_path`, `tactile_events_path`, and `tactile_stream_paths`.
 
-Do not symlink the dataset tree when the manifest contains paths relative to the original project root. In **Settings → Source project root**, point directly to that original project (for example `/mnt/hdd/pyr/LF3R`). The WebUI also accepts the legacy `datasets/lf3r_failure_rollouts/v1/failrecovery_manifest.jsonl` there and resolves every exported relative video/tactile path against the same source root. The standalone repository keeps its own annotations and experiment outputs.
+Do not symlink the dataset tree when the manifest contains paths relative to the original project root. In **Settings → Source project root**, point directly to that original project (for example `/mnt/hdd/pyr/LF3R`). The WebUI uses `datasets/failrecovery/manifest.jsonl` in this standalone repository. For an unmigrated dissertation source, it also accepts the legacy `datasets/lf3r_failure_rollouts/v1/failrecovery_manifest.jsonl` and resolves every exported relative video/tactile path against the same source root. The standalone repository keeps its own annotations and experiment outputs.
 
 ## One-command migration
 
@@ -62,7 +62,7 @@ To make this repository self-contained from the dissertation/LF3R project, run:
 bash tools/migrate_from_lf3r.sh /mnt/hdd/pyr/LF3R
 ```
 
-The script copies the exported fail-recovery dataset into the flat layout, rewrites manifest paths that still contain `/v1/`, migrates annotation records/events and USB interval seeds, and copies the tactile encoder checkpoints plus the two external tactile repositories when present. It intentionally does not copy virtual environments, raw recorder SQLite data, or historical generated SHARPA runs.
+The script copies the exported fail-recovery dataset into `datasets/failrecovery/`, rewrites manifest paths that still contain `/v1/`, migrates annotation records/events and USB interval seeds, and copies the tactile encoder checkpoints plus the two external tactile repositories when present. It intentionally does not copy virtual environments, raw recorder SQLite data, or historical generated SHARPA runs.
 
 ## Run the WebUI
 
@@ -92,7 +92,7 @@ Each saved record keeps the experiment-compatible fields `rollout_id`, `event_in
 Standalone annotations are stored one rollout per file under:
 
 ```text
-annotations/failure_annotations/records/<rollout-id>.tactile.json
+annotations/failrecovery/records/<rollout-id>.tactile.json
 ```
 
 Existing `<rollout-id>.json` LF3R records can coexist beside the tactile sidecars and are never overwritten. If a tactile sidecar does not yet exist, the WebUI looks for the latest historical source matching:

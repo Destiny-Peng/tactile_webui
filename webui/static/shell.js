@@ -20,6 +20,8 @@ var state = {
   tactileSeriesKey: "",
   tactileSeriesPromise: null,
   tactileAppliedKey: "",
+  tactileLoadActive: false,
+  tactilePendingFrame: null,
   results: {
     sources: [], selectedSource: "", selectedId: "", currentFrame: 0,
     points: [], videoGeneration: 0
@@ -278,6 +280,8 @@ function selectRollout(id) {
   state.tactileSeriesKey = "";
   state.tactileSeriesPromise = null;
   state.tactileAppliedKey = "";
+  state.tactilePendingFrame = null;
+  state.tactileGeneration += 1;
   byId("annotateEmpty").classList.add("hidden");
   byId("annotateContent").classList.remove("hidden");
   renderRolloutList();
@@ -386,12 +390,11 @@ function ensureAnnotateTactileSeries(record, camera) {
     });
   return state.tactileSeriesPromise;
 }
-async function updateAnnotateTactile(frame) {
+async function loadAnnotateTactileFrame(frame, generation) {
   var record = selectedRollout();
   if (!record) return;
   var camera = byId("annotateCamera").value || chooseCamera(record);
   var kind = state.settings && state.settings.default_tactile_kind || "deform";
-  var generation = ++state.tactileGeneration;
   var series = await ensureAnnotateTactileSeries(record, camera);
   if (generation !== state.tactileGeneration || !series) return;
   var sync = nearestAnnotateTactileSync(series, frame);
@@ -403,6 +406,7 @@ async function updateAnnotateTactile(frame) {
   byId("annotateTactileStatus").textContent = camera + " · video " + frame + " → tactile " + sync.frame + " · loading " + kind;
   var cells = [];
   var loads = [];
+  var started = performance.now();
   TACTILE_FINGERS.forEach(function (finger) {
     var info = fingerRows[finger] || {};
     if (info.event_id == null) { cells.push({ finger: finger, missing: true }); return; }
@@ -423,13 +427,34 @@ async function updateAnnotateTactile(frame) {
     queueTelemetry({ event: "tactile_image_error", level: "error", rollout_id: record.id, camera: camera, frame: frame, matched_frame: sync.frame, kind: kind, message: String(error.message || error) });
     return;
   }
-  if (generation !== state.tactileGeneration) return;
+  if (generation !== state.tactileGeneration || record.id !== state.selectedId) return;
   byId("annotateTactileGrid").innerHTML = cells.map(function (cell) {
     return '<div class="annotate-tactile-finger"><strong>' + escapeHtml(cell.finger) + '</strong>'
       + (cell.missing ? '<div class="tactile-missing">No sample</div>' : '<img src="' + escapeHtml(cell.url) + '" alt="' + escapeHtml(cell.finger + " " + kind) + '">') + '</div>';
   }).join("");
   state.tactileAppliedKey = key;
+  var duration = performance.now() - started;
+  if (duration >= 250) queueTelemetry({ event: "tactile_batch_slow", level: duration >= 1000 ? "error" : "info", rollout_id: record.id, camera: camera, frame: frame, matched_frame: sync.frame, kind: kind, duration_ms: duration });
   byId("annotateTactileStatus").textContent = camera + " · video " + frame + " → tactile " + sync.frame + " · " + kind;
+}
+async function drainAnnotateTactileQueue() {
+  if (state.tactileLoadActive) return;
+  state.tactileLoadActive = true;
+  var generation = state.tactileGeneration;
+  try {
+    while (state.tactilePendingFrame != null && generation === state.tactileGeneration) {
+      var frame = state.tactilePendingFrame;
+      state.tactilePendingFrame = null;
+      await loadAnnotateTactileFrame(frame, generation);
+    }
+  } finally {
+    state.tactileLoadActive = false;
+    if (state.tactilePendingFrame != null) Promise.resolve().then(drainAnnotateTactileQueue);
+  }
+}
+function updateAnnotateTactile(frame) {
+  state.tactilePendingFrame = clampFrame(frame);
+  if (!state.tactileLoadActive) drainAnnotateTactileQueue();
 }
 function togglePlay() {
   var video = byId("annotateVideo");
@@ -730,7 +755,7 @@ function bindEvents() {
   document.querySelectorAll(".nav-item").forEach(function (button) { button.addEventListener("click", function () { switchView(button.dataset.view); }); });
   byId("annotateSearch").addEventListener("input", filterRollouts); byId("annotateTaskFilter").addEventListener("change", filterRollouts); byId("annotateReviewFilter").addEventListener("change", filterRollouts);
   byId("annotatePrevious").addEventListener("click", function () { navigateRollout(-1); }); byId("annotateNext").addEventListener("click", function () { navigateRollout(1); });
-  byId("annotateCamera").addEventListener("change", function () { state.tactileSeries = null; state.tactileSeriesKey = ""; state.tactileSeriesPromise = null; state.tactileAppliedKey = ""; loadAnnotateVideo(); seekFrame(0); }); byId("annotatePlay").addEventListener("click", togglePlay); byId("annotateStepBack").addEventListener("click", function () { seekFrame(state.currentFrame - 1); }); byId("annotateStepForward").addEventListener("click", function () { seekFrame(state.currentFrame + 1); }); byId("annotateFrameSlider").addEventListener("input", function (event) { seekFrame(event.target.value); });
+  byId("annotateCamera").addEventListener("change", function () { state.tactileSeries = null; state.tactileSeriesKey = ""; state.tactileSeriesPromise = null; state.tactileAppliedKey = ""; state.tactilePendingFrame = null; state.tactileGeneration += 1; loadAnnotateVideo(); seekFrame(0); }); byId("annotatePlay").addEventListener("click", togglePlay); byId("annotateStepBack").addEventListener("click", function () { seekFrame(state.currentFrame - 1); }); byId("annotateStepForward").addEventListener("click", function () { seekFrame(state.currentFrame + 1); }); byId("annotateFrameSlider").addEventListener("input", function (event) { seekFrame(event.target.value); });
   byId("annotateVideo").addEventListener("play", function () { byId("annotatePlay").textContent = "Pause"; }); byId("annotateVideo").addEventListener("pause", function () { byId("annotatePlay").textContent = "Play"; }); byId("annotateVideo").addEventListener("timeupdate", function () { var record = selectedRollout(); if (record) updateFrameUi(Math.round(byId("annotateVideo").currentTime * (Number(record.fps) || 30)), false); });
   byId("addInterval").addEventListener("click", function () { addInterval(6); }); byId("saveIntervals").addEventListener("click", saveIntervals);
   byId("resultsSource").addEventListener("change", loadResultsCurve); byId("resultsRollout").addEventListener("change", loadResultsCurve); byId("resultsCamera").addEventListener("change", function () { loadResultsVideo(); seekResultsFrame(0); }); byId("refreshResults").addEventListener("click", function () { loadResultsSources(true); }); byId("resultsPlay").addEventListener("click", toggleResultsPlay); byId("resultsStepBack").addEventListener("click", function () { seekResultsFrame(state.results.currentFrame - 1); }); byId("resultsStepForward").addEventListener("click", function () { seekResultsFrame(state.results.currentFrame + 1); }); byId("resultsFrameSlider").addEventListener("input", function (event) { seekResultsFrame(event.target.value); }); byId("resultsVideo").addEventListener("play", function () { byId("resultsPlay").textContent = "Pause"; }); byId("resultsVideo").addEventListener("pause", function () { byId("resultsPlay").textContent = "Play"; }); byId("resultsVideo").addEventListener("timeupdate", function () { var record = resultRollout(); if (record) updateResultsFrame(Math.round(byId("resultsVideo").currentTime * (Number(record.fps) || 30))); });

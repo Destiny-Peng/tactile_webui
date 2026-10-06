@@ -23,6 +23,9 @@
     eventLookup: null,
     currentFrame: 0,
     lastSyncKey: "",
+    imageLoadActive: false,
+    pendingRender: null,
+    renderSerial: 0,
     videoFrameCallbackId: 0,
     animationFrameId: 0
   };
@@ -207,6 +210,8 @@
     state.seriesSerial += 1;
     state.eventLookup = null;
     state.lastSyncKey = "";
+    state.pendingRender = null;
+    state.renderSerial += 1;
     grid.innerHTML = "";
     curveNode.innerHTML = '<div class="placeholder">Loading f6 history…</div>';
     statusNode.textContent = "Loading tactile timeline…";
@@ -481,10 +486,18 @@
     return state.loadingSeriesPromise;
   }
 
-  function renderSynchronizedFrame(record, camera, match, frame, force) {
+  function preloadTactileImage(url) {
+    return new Promise(function (resolve, reject) {
+      var image = new Image();
+      image.onload = resolve;
+      image.onerror = function () { reject(new Error("tactile image failed")); };
+      image.src = url;
+    });
+  }
+
+  async function applySynchronizedFrame(record, camera, match, frame, force, serial) {
     if (!match || !match.row) {
       statusNode.textContent = "No synchronized tactile frame.";
-      grid.innerHTML = "";
       return;
     }
     var syncRow = match.row;
@@ -494,16 +507,56 @@
       updateCurvePlayhead(frame);
       return;
     }
-    state.lastSyncKey = syncKey;
-    grid.style.setProperty("--tactile-cell-aspect", kind === "raw" ? "4 / 3" : "1 / 1");
+    var fingerData = {};
+    var loads = [];
+    FINGERS.forEach(function (finger) {
+      var data = currentFingerData(syncRow, finger);
+      fingerData[finger] = data;
+      var kinds = data && Array.isArray(data.image_kinds) ? data.image_kinds : [];
+      if (data && data.event_id != null && kinds.indexOf(kind) >= 0) {
+        loads.push(preloadTactileImage(tactileImageUrl(record, finger, data.event_id, kind)));
+      }
+    });
     var completeText = syncRow.complete === false ? "incomplete" : "complete";
+    statusNode.textContent = camera + " frame " + frame + " → sync frame " + syncRow.frame + " · loading " + kind;
+    try {
+      await Promise.all(loads);
+    } catch (_error) {
+      if (serial === state.renderSerial) statusNode.textContent = "Tactile image load failed; keeping previous frame";
+      return;
+    }
+    if (serial !== state.renderSerial || record.id !== state.selectedId || camera !== state.camera) return;
+    grid.style.setProperty("--tactile-cell-aspect", kind === "raw" ? "4 / 3" : "1 / 1");
+    grid.innerHTML = FINGERS.map(function (finger) {
+      return renderFinger(record, finger, fingerData[finger], kind);
+    }).join("");
+    state.lastSyncKey = syncKey;
     statusNode.textContent = camera + " frame " + frame
       + " → sync frame " + syncRow.frame
       + " · row " + syncRow.sync_row + " · " + completeText;
-    grid.innerHTML = FINGERS.map(function (finger) {
-      return renderFinger(record, finger, currentFingerData(syncRow, finger), kind);
-    }).join("");
     updateCurvePlayhead(frame);
+  }
+
+  async function drainSynchronizedFrameQueue() {
+    if (state.imageLoadActive) return;
+    state.imageLoadActive = true;
+    var serial = state.renderSerial;
+    try {
+      while (state.pendingRender && serial === state.renderSerial) {
+        var pending = state.pendingRender;
+        state.pendingRender = null;
+        await applySynchronizedFrame(pending.record, pending.camera, pending.match, pending.frame, pending.force, serial);
+      }
+    } finally {
+      state.imageLoadActive = false;
+      if (state.pendingRender) Promise.resolve().then(drainSynchronizedFrameQueue);
+    }
+  }
+
+  function requestSynchronizedFrame(record, camera, match, frame, force) {
+    state.pendingRender = { record: record, camera: camera, match: match, frame: frame, force: force };
+    updateCurvePlayhead(frame);
+    if (!state.imageLoadActive) drainSynchronizedFrameQueue();
   }
 
   async function refreshTactile(frame, force) {
@@ -512,7 +565,7 @@
     updateReadout(frame);
     var series = await ensureSeries(record, state.camera);
     if (!series) return;
-    renderSynchronizedFrame(record, state.camera, nearestSyncFrame(state.currentFrame), state.currentFrame, Boolean(force));
+    requestSynchronizedFrame(record, state.camera, nearestSyncFrame(state.currentFrame), state.currentFrame, Boolean(force));
   }
 
   function installVideoDrivenRefresh() {
@@ -570,12 +623,16 @@
     state.seriesSerial += 1;
     state.eventLookup = null;
     state.lastSyncKey = "";
+    state.pendingRender = null;
+    state.renderSerial += 1;
     setVideoSource(record, true);
     await ensureSeries(record, state.camera);
     refreshTactile(state.currentFrame, true);
   });
   byId("kindSelect").addEventListener("change", function () {
     state.lastSyncKey = "";
+    state.pendingRender = null;
+    state.renderSerial += 1;
     refreshTactile(state.currentFrame, true);
   });
   byId("curveFingerSelect").addEventListener("change", renderCurve);

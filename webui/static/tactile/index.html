@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LF3R Tactile Review</title>
+  <meta name="description" content="Standalone tactile rollout viewer for LF3R fail-recovery data">
+  <link rel="stylesheet" href="/static/tactile/styles.css">
+  <script src="/static/tactile/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark">T</div>
+      <div>
+        <p class="eyebrow">LF3R DATA OPERATIONS</p>
+        <h1>Tactile Review</h1>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <span id="datasetStatus" class="status">Loading tactile rollouts…</span>
+      <a class="ghost-link" href="/">Back to LF3R</a>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="catalog">
+      <div class="catalog-heading">
+        <div>
+          <p class="eyebrow">TACTILE DATASET</p>
+          <h2>Rollouts</h2>
+        </div>
+        <span id="visibleCount" class="count-chip">0</span>
+      </div>
+      <label class="search-box">
+        <span class="sr-only">Search tactile rollouts</span>
+        <input id="searchInput" type="search" placeholder="Search task or rollout…" autocomplete="off">
+      </label>
+      <div id="rolloutList" class="rollout-list" aria-live="polite"></div>
+    </aside>
+
+    <section class="viewer">
+      <div id="emptyState" class="empty-state">
+        <p class="eyebrow">NO TACTILE ROLLOUT SELECTED</p>
+        <h2>Choose a rollout with synchronized tactile data.</h2>
+      </div>
+
+      <div id="viewerContent" class="viewer-content hidden">
+        <section class="record-header">
+          <div>
+            <div id="recordBadges" class="badge-row"></div>
+            <h2 id="taskTitle">Task</h2>
+            <p id="recordMeta" class="record-meta"></p>
+          </div>
+          <div class="record-navigation">
+            <button id="previousButton" class="ghost-button" type="button">← Previous</button>
+            <button id="nextButton" class="ghost-button" type="button">Next →</button>
+          </div>
+        </section>
+
+        <section class="video-card">
+          <div class="control-row">
+            <label><span>Camera</span><select id="cameraSelect"></select></label>
+            <label><span>Image</span><select id="kindSelect"><option value="deform" selected>Deform</option><option value="raw">Raw</option></select></label>
+            <label><span>f6 curve</span><select id="curveFingerSelect">
+              <option value="thumb">Thumb</option>
+              <option value="index" selected>Index</option>
+              <option value="middle">Middle</option>
+              <option value="ring">Ring</option>
+              <option value="pinky">Pinky</option>
+            </select></label>
+          </div>
+
+          <div class="video-shell">
+            <video id="rolloutVideo" preload="metadata" playsinline></video>
+          </div>
+          <div class="transport">
+            <button id="playButton" class="primary-button" type="button">Play</button>
+            <button id="stepBackButton" type="button">−1 frame</button>
+            <button id="stepForwardButton" type="button">+1 frame</button>
+            <span id="timeReadout" class="readout">00:00.000</span>
+            <span id="frameReadout" class="readout">Frame 0 / 0</span>
+          </div>
+          <input id="frameSlider" class="frame-slider" type="range" min="0" max="1" step="1" value="0" aria-label="Video frame">
+        </section>
+
+        <section class="tactile-card">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">SYNCHRONIZED TACTILE</p>
+              <h2>Right-hand fingertips</h2>
+            </div>
+            <span id="tactileStatus" class="tactile-status">Waiting for synchronized frame…</span>
+          </div>
+
+          <div class="curve-panel">
+            <div class="curve-heading">
+              <strong>f6 history</strong>
+              <div class="curve-legend" aria-label="f6 component legend">
+                <span><i class="trace-0"></i>f1</span>
+                <span><i class="trace-1"></i>f2</span>
+                <span><i class="trace-2"></i>f3</span>
+                <span><i class="trace-3"></i>f4</span>
+                <span><i class="trace-4"></i>f5</span>
+                <span><i class="trace-5"></i>f6</span>
+              </div>
+            </div>
+            <div id="tactileCurve" class="tactile-curve">
+              <div class="placeholder">Loading f6 history…</div>
+            </div>
+          </div>
+
+          <div id="tactileGrid" class="tactile-grid"></div>
+        </section>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

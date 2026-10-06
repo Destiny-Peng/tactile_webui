@@ -1,0 +1,21 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.DS_Store
+
+# Local data / weights / external repos
+datasets/
+checkpoints/
+repos/
+outputs/
+artifacts/
+
+# Experiment caches
+*.pt
+*.pth
+*.npz
+*.npy
+*.mp4
+*.bin

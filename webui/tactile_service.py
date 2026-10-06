@@ -1,4 +1,4 @@
-"""FailRecovery tactile reader used only by the LF3R Results WebUI."""
+"""FailRecovery tactile reader for the standalone tactile WebUI."""
 
 from __future__ import annotations
 
@@ -31,15 +31,19 @@ class EpisodeTactile:
 class FailRecoveryTactileService:
     """Small, dataset-specific index for failrecovery_manifest.jsonl."""
 
-    def __init__(self, project_root: Path) -> None:
-        self.project_root = project_root.resolve()
-        self.manifest_path = (
+    def __init__(self, project_root: Path, manifest_path: Path | None = None) -> None:
+        self.project_root = project_root.expanduser().resolve()
+        self.manifest_path = (manifest_path or (
             self.project_root
             / "datasets"
             / "lf3r_failure_rollouts"
             / "v1"
             / "failrecovery_manifest.jsonl"
-        )
+        )).expanduser().resolve()
+        try:
+            self.manifest_path.relative_to(self.project_root)
+        except ValueError as exc:
+            raise ValueError("manifest path escapes source project root") from exc
         self.episodes: dict[str, EpisodeTactile] = {}
         self._series_cache: dict[tuple[str, str], dict[str, Any]] = {}
         self._sprite_cache: OrderedDict[tuple[str, str, int, str], bytes] = OrderedDict()

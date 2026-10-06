@@ -53,7 +53,7 @@ datasets/
 
 Manifest entries use the exported fields `camera_video_paths`, `synchronized_frames_path`, `tactile_events_path`, and `tactile_stream_paths`.
 
-Copy the dataset into this repository or symlink `datasets/lf3r_failure_rollouts` to the existing dataset location.
+Do not symlink the dataset tree when the manifest contains paths relative to the original project root. In **Settings → Source project root**, point directly to that original project (for example `/mnt/hdd/pyr/LF3R`). The WebUI reads `datasets/lf3r_failure_rollouts/v1/failrecovery_manifest.jsonl` there and resolves every exported relative video/tactile path against the same source root. The standalone repository keeps its own annotations and experiment outputs.
 
 ## Run the WebUI
 

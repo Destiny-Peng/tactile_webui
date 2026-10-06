@@ -321,3 +321,11 @@ body.theme-dark button, body.theme-dark select, body.theme-dark input { color: v
   .interval-row .interval-field { grid-column: 2; }
   .interval-actions { grid-column: 2; }
 }
+
+.tactile-preview-card { display: block; }
+.tactile-preview-card > div:first-child { margin-bottom: 9px; }
+.annotate-tactile-grid { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 7px; }
+.annotate-tactile-finger { min-width: 0; padding: 5px; background: #f7f9fc; border: 1px solid var(--line-soft); border-radius: 8px; }
+.annotate-tactile-finger strong { display: block; margin-bottom: 4px; color: #5d6c7f; font: 700 .55rem/1 ui-monospace,monospace; text-align: center; text-transform: uppercase; }
+.annotate-tactile-finger img { display: block; width: 100%; aspect-ratio: 1 / 1; object-fit: contain; background: #eef2f6; border-radius: 5px; }
+.annotate-tactile-finger .tactile-missing { display: grid; width: 100%; aspect-ratio: 1 / 1; place-items: center; color: var(--muted); background: #eef2f6; border-radius: 5px; font-size: .52rem; }

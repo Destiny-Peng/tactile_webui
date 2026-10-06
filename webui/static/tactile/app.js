@@ -331,7 +331,14 @@
     }).join("");
   }
 
-  function renderFinger(finger, data, kind) {
+  function tactileImageUrl(record, finger, eventId, kind) {
+    return "/api/tactile/" + encodeURIComponent(record.id) + "/image"
+      + "?finger=" + encodeURIComponent(finger)
+      + "&event_id=" + encodeURIComponent(eventId)
+      + "&kind=" + encodeURIComponent(kind);
+  }
+
+  function renderFinger(record, finger, data, kind) {
     if (!data) {
       return '<article class="finger-card"><header><strong>' + escapeHtml(LABELS[finger])
         + '</strong><span class="chip">missing</span></header><div class="tactile-image placeholder">No sample</div></article>';
@@ -341,10 +348,9 @@
     var invalid = data.valid === false;
     var stale = data.stale === true;
     var age = Number(data.age_ms);
-    var fingerIndex = FINGERS.indexOf(finger);
     var image = hasImage
-      ? '<div class="tactile-image tactile-sprite finger-' + fingerIndex + '" role="img" aria-label="'
-        + escapeHtml(LABELS[finger]) + ' tactile ' + escapeHtml(kind) + '"></div>'
+      ? '<img class="tactile-image" loading="eager" src="' + escapeHtml(tactileImageUrl(record, finger, data.event_id, kind)) + '" alt="'
+        + escapeHtml(LABELS[finger]) + ' tactile ' + escapeHtml(kind) + '">'
       : '<div class="tactile-image placeholder">No image</div>';
     return '<article class="finger-card' + (invalid ? ' is-invalid' : '') + (stale ? ' is-stale' : '') + '">'
       + '<header><strong>' + escapeHtml(LABELS[finger]) + '</strong><span class="chips">'
@@ -558,10 +564,9 @@
       + " → sync frame " + syncRow.frame
       + " · row " + syncRow.sync_row + " · " + completeText;
     grid.innerHTML = FINGERS.map(function (finger) {
-      return renderFinger(finger, currentFingerData(syncRow, finger), kind);
+      return renderFinger(record, finger, currentFingerData(syncRow, finger), kind);
     }).join("");
     state.appliedSpriteKey = "";
-    applySprite(record, camera, Number(syncRow.frame), match.index, kind);
     updateCurvePlayhead(frame);
   }
 

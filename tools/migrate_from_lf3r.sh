@@ -81,6 +81,9 @@ target.write_text(
 print(f"rewrote {len(rows)} manifest rows")
 PY
 
+note "materializing static tactile images"
+python3 "$TARGET_ROOT/tools/materialize_tactile_images.py" --root "$TARGET_ROOT" --manifest datasets/failrecovery/manifest.jsonl
+
 note "migrating annotations into annotations/failrecovery"
 TARGET_ANN="$TARGET_ROOT/annotations/failrecovery"
 mkdir -p "$TARGET_ANN/records" "$TARGET_ANN/events"

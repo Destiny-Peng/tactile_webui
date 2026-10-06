@@ -502,6 +502,20 @@ class FailRecoveryTactileService:
             + cls._png_chunk(b"IEND", b"")
         )
 
+    def static_image_path(self, rollout_id: str, finger: str, event_id: str, kind: str) -> Path | None:
+        if finger not in FINGERS or kind not in KINDS:
+            raise KeyError("unknown tactile image")
+        episode = self._episode(rollout_id)
+        event = self._event(episode, finger, event_id)
+        stream = episode.streams.get(finger, {}).get(kind)
+        if event is None or stream is None:
+            raise KeyError("tactile image not found")
+        sample_index = event.get("sample_index")
+        if sample_index is None:
+            return None
+        path = stream.parent / "images" / kind / finger / f"{int(sample_index):06d}.png"
+        return path if path.is_file() else None
+
     def image(self, rollout_id: str, finger: str, event_id: str, kind: str) -> bytes:
         if finger not in FINGERS or kind not in KINDS:
             raise KeyError("unknown tactile image")
@@ -511,6 +525,12 @@ class FailRecoveryTactileService:
         if event is None or stream is None:
             raise KeyError("tactile image not found")
 
+        static_path = self.static_image_path(rollout_id, finger, event_id, kind)
+        if static_path is not None:
+            return static_path.read_bytes()
+
+        # Compatibility fallback for an old export that has not been
+        # materialized yet. Canonical migrated/new exports use static PNGs.
         offset = int(event[kind + "_offset_bytes"])
         length = int(event[kind + "_length_bytes"])
         shape = event[kind + "_shape"]

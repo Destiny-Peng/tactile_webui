@@ -285,3 +285,6 @@ h1 { margin-top: .1rem; font-size: 1.15rem; }
   .section-heading { align-items: flex-start; flex-direction: column; }
   .tactile-status { text-align: left; }
 }
+
+.tactile-image-static-mode { display: none; }
+img.tactile-image { object-fit: contain; }

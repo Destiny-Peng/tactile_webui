@@ -175,3 +175,31 @@ checkpoints/T-Rex/encoders/
 ## Intentionally excluded
 
 This split does not include LIBERO, repair/world-model code, general LF3R baseline jobs, Robo-Dopamine/SAFE/ProcVLM integrations, raw tactile datasets, checkpoints, or vendored third-party repositories.
+
+## Static tactile images
+
+The WebUI uses materialized tactile PNGs for display instead of encoding PNGs on every frame request. Images are grouped by kind and finger inside each episode:
+
+```text
+tactile/images/
+  deform/
+    thumb/
+    index/
+    middle/
+    ring/
+    pinky/
+  raw/
+    thumb/
+    index/
+    middle/
+    ring/
+    pinky/
+```
+
+Filenames use the per-finger `sample_index` (`000000.png`, `000001.png`, ...), so repeated video frames that reference the same tactile event do not duplicate images. `tools/migrate_from_lf3r.sh` materializes these files automatically. For an existing canonical dataset, run:
+
+```bash
+python tools/materialize_tactile_images.py --root .
+```
+
+The server retains a compatibility fallback to the packed `.u8` streams when a static PNG is missing, but migrated and newly exported episodes use the static path.

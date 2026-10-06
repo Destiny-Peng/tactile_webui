@@ -36,8 +36,8 @@ class FailRecoveryTactileService:
         self.manifest_path = (manifest_path or (
             self.project_root
             / "datasets"
-            / "lf3r_failure_rollouts"
-            / "failrecovery_manifest.jsonl"
+            / "failrecovery"
+            / "manifest.jsonl"
         )).expanduser().resolve()
         try:
             self.manifest_path.relative_to(self.project_root)

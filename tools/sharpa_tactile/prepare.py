@@ -55,7 +55,7 @@ def reconstruction_once(encoders, arrays, streams, out, record):
 def main():
     parser = argparse.ArgumentParser(description='Cache frozen tactile features and make shared rollout splits')
     parser.add_argument('--intervals',type=Path,default=ROOT/'outputs/usb_event_intervals/20261003_202352/intervals.jsonl')
-    parser.add_argument('--manifest',type=Path,default=ROOT/'datasets/lf3r_failure_rollouts/failrecovery_manifest.jsonl')
+    parser.add_argument('--manifest',type=Path,default=ROOT/'datasets/failrecovery/manifest.jsonl')
     parser.add_argument('--output',type=Path,required=True)
     parser.add_argument('--device',default='cuda:0')
     parser.add_argument('--batch-size',type=int,default=16)

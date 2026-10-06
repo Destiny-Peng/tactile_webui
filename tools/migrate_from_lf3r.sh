@@ -14,28 +14,37 @@ command -v python3 >/dev/null 2>&1 || fail "python3 is required"
 SOURCE_ROOT="$(cd "$SOURCE_ROOT" 2>/dev/null && pwd)" || fail "source root not found: $SOURCE_ROOT"
 [[ "$SOURCE_ROOT" != "$TARGET_ROOT" ]] || fail "source and target repositories must be different"
 
+# Accept the original dissertation layout, the first standalone migration
+# layout, and the new dataset-centric layout as migration inputs.
 LEGACY_DATA="$SOURCE_ROOT/datasets/lf3r_failure_rollouts/v1"
-FLAT_DATA="$SOURCE_ROOT/datasets/lf3r_failure_rollouts"
+TRANSITIONAL_DATA="$SOURCE_ROOT/datasets/lf3r_failure_rollouts"
+CANONICAL_DATA="$SOURCE_ROOT/datasets/failrecovery"
 
 if [[ -f "$LEGACY_DATA/failrecovery_manifest.jsonl" ]]; then
-  SOURCE_DATA="$LEGACY_DATA"
-  SOURCE_PREFIX="datasets/lf3r_failure_rollouts/v1/"
-elif [[ -f "$FLAT_DATA/failrecovery_manifest.jsonl" ]]; then
-  SOURCE_DATA="$FLAT_DATA"
-  SOURCE_PREFIX="datasets/lf3r_failure_rollouts/"
+  SOURCE_EPISODES="$LEGACY_DATA/failrecovery"
+  SOURCE_MANIFEST="$LEGACY_DATA/failrecovery_manifest.jsonl"
+  SOURCE_PREFIX="datasets/lf3r_failure_rollouts/v1/failrecovery/"
+elif [[ -f "$TRANSITIONAL_DATA/failrecovery_manifest.jsonl" ]]; then
+  SOURCE_EPISODES="$TRANSITIONAL_DATA/failrecovery"
+  SOURCE_MANIFEST="$TRANSITIONAL_DATA/failrecovery_manifest.jsonl"
+  SOURCE_PREFIX="datasets/lf3r_failure_rollouts/failrecovery/"
+elif [[ -f "$CANONICAL_DATA/manifest.jsonl" ]]; then
+  SOURCE_EPISODES="$CANONICAL_DATA"
+  SOURCE_MANIFEST="$CANONICAL_DATA/manifest.jsonl"
+  SOURCE_PREFIX="datasets/failrecovery/"
 else
-  fail "failrecovery_manifest.jsonl not found under $SOURCE_ROOT/datasets/lf3r_failure_rollouts"
+  fail "no failrecovery manifest found under $SOURCE_ROOT/datasets"
 fi
 
-TARGET_DATA="$TARGET_ROOT/datasets/lf3r_failure_rollouts"
+TARGET_DATA="$TARGET_ROOT/datasets/failrecovery"
 mkdir -p "$TARGET_DATA"
 
-note "copying fail-recovery export"
-[[ -d "$SOURCE_DATA/failrecovery" ]] || fail "missing exported episode directory: $SOURCE_DATA/failrecovery"
-rsync -a --info=stats2 "$SOURCE_DATA/failrecovery/" "$TARGET_DATA/failrecovery/"
+note "copying fail-recovery dataset"
+[[ -d "$SOURCE_EPISODES" ]] || fail "missing episode directory: $SOURCE_EPISODES"
+rsync -a --info=stats2 --exclude 'manifest.jsonl' "$SOURCE_EPISODES/" "$TARGET_DATA/"
 
-note "rewriting manifest into flat standalone layout"
-python3 - "$SOURCE_DATA/failrecovery_manifest.jsonl" "$TARGET_DATA/failrecovery_manifest.jsonl" "$SOURCE_PREFIX" <<'PY'
+note "rewriting dataset-local manifest"
+python3 - "$SOURCE_MANIFEST" "$TARGET_DATA/manifest.jsonl" "$SOURCE_PREFIX" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -43,12 +52,12 @@ from pathlib import Path
 source = Path(sys.argv[1])
 target = Path(sys.argv[2])
 source_prefix = sys.argv[3]
-flat_prefix = "datasets/lf3r_failure_rollouts/"
+target_prefix = "datasets/failrecovery/"
 
 def rewrite(value):
     if isinstance(value, str):
         if value.startswith(source_prefix):
-            return flat_prefix + value[len(source_prefix):]
+            return target_prefix + value[len(source_prefix):]
         return value
     if isinstance(value, list):
         return [rewrite(item) for item in value]
@@ -72,56 +81,41 @@ target.write_text(
 print(f"rewrote {len(rows)} manifest rows")
 PY
 
-note "flattening annotations already present in tactile_webui"
-if [[ -d "$TARGET_ROOT/annotations/failure_annotations/v1" ]]; then
-  mkdir -p \
-    "$TARGET_ROOT/annotations/failure_annotations/records" \
-    "$TARGET_ROOT/annotations/failure_annotations/events"
-  if [[ -d "$TARGET_ROOT/annotations/failure_annotations/v1/records" ]]; then
-    rsync -a --ignore-existing \
-      "$TARGET_ROOT/annotations/failure_annotations/v1/records/" \
-      "$TARGET_ROOT/annotations/failure_annotations/records/"
-  fi
-  if [[ -d "$TARGET_ROOT/annotations/failure_annotations/v1/events" ]]; then
-    rsync -a --ignore-existing \
-      "$TARGET_ROOT/annotations/failure_annotations/v1/events/" \
-      "$TARGET_ROOT/annotations/failure_annotations/events/"
-  fi
-  rm -rf "$TARGET_ROOT/annotations/failure_annotations/v1"
-fi
+note "migrating annotations into annotations/failrecovery"
+TARGET_ANN="$TARGET_ROOT/annotations/failrecovery"
+mkdir -p "$TARGET_ANN/records" "$TARGET_ANN/events"
 
-note "migrating annotation records and save-event history"
+# First migrate annotations that may already exist in this standalone repo.
+for local_ann in \
+  "$TARGET_ROOT/annotations/failure_annotations/v1" \
+  "$TARGET_ROOT/annotations/failure_annotations"; do
+  if [[ -d "$local_ann/records" ]]; then
+    rsync -a --ignore-existing "$local_ann/records/" "$TARGET_ANN/records/"
+  fi
+  if [[ -d "$local_ann/events" ]]; then
+    rsync -a --ignore-existing "$local_ann/events/" "$TARGET_ANN/events/"
+  fi
+done
+
 SOURCE_ANN=""
-if [[ -d "$SOURCE_ROOT/annotations/failure_annotations/v1" ]]; then
+if [[ -d "$SOURCE_ROOT/annotations/failrecovery" ]]; then
+  SOURCE_ANN="$SOURCE_ROOT/annotations/failrecovery"
+elif [[ -d "$SOURCE_ROOT/annotations/failure_annotations/v1" ]]; then
   SOURCE_ANN="$SOURCE_ROOT/annotations/failure_annotations/v1"
 elif [[ -d "$SOURCE_ROOT/annotations/failure_annotations" ]]; then
   SOURCE_ANN="$SOURCE_ROOT/annotations/failure_annotations"
 fi
-
 if [[ -n "$SOURCE_ANN" ]]; then
-  mkdir -p \
-    "$TARGET_ROOT/annotations/failure_annotations/records" \
-    "$TARGET_ROOT/annotations/failure_annotations/events"
-  if [[ -d "$SOURCE_ANN/records" ]]; then
-    rsync -a --ignore-existing \
-      "$SOURCE_ANN/records/" \
-      "$TARGET_ROOT/annotations/failure_annotations/records/"
-  fi
-  if [[ -d "$SOURCE_ANN/events" ]]; then
-    rsync -a --ignore-existing \
-      "$SOURCE_ANN/events/" \
-      "$TARGET_ROOT/annotations/failure_annotations/events/"
-  fi
+  [[ ! -d "$SOURCE_ANN/records" ]] || rsync -a --ignore-existing "$SOURCE_ANN/records/" "$TARGET_ANN/records/"
+  [[ ! -d "$SOURCE_ANN/events" ]] || rsync -a --ignore-existing "$SOURCE_ANN/events/" "$TARGET_ANN/events/"
 else
-  note "no annotation directory found; skipping"
+  note "no annotation directory found; skipping source annotations"
 fi
 
 note "migrating USB interval seeds"
 if [[ -d "$SOURCE_ROOT/outputs/usb_event_intervals" ]]; then
   mkdir -p "$TARGET_ROOT/outputs/usb_event_intervals"
-  rsync -a --ignore-existing \
-    "$SOURCE_ROOT/outputs/usb_event_intervals/" \
-    "$TARGET_ROOT/outputs/usb_event_intervals/"
+  rsync -a --ignore-existing "$SOURCE_ROOT/outputs/usb_event_intervals/" "$TARGET_ROOT/outputs/usb_event_intervals/"
 else
   note "no outputs/usb_event_intervals found; skipping"
 fi
@@ -129,9 +123,7 @@ fi
 note "migrating frozen tactile encoders"
 if [[ -d "$SOURCE_ROOT/checkpoints/T-Rex/encoders" ]]; then
   mkdir -p "$TARGET_ROOT/checkpoints/T-Rex/encoders"
-  rsync -a --ignore-existing \
-    "$SOURCE_ROOT/checkpoints/T-Rex/encoders/" \
-    "$TARGET_ROOT/checkpoints/T-Rex/encoders/"
+  rsync -a --ignore-existing "$SOURCE_ROOT/checkpoints/T-Rex/encoders/" "$TARGET_ROOT/checkpoints/T-Rex/encoders/"
 else
   note "no checkpoints/T-Rex/encoders found; skipping"
 fi
@@ -140,17 +132,13 @@ note "migrating external tactile repositories"
 for repo in T-Rex sharpawave-deform-encoder; do
   if [[ -d "$SOURCE_ROOT/repos/$repo" ]]; then
     mkdir -p "$TARGET_ROOT/repos/$repo"
-    rsync -a \
-      --exclude '.venv' \
-      --exclude '__pycache__' \
-      "$SOURCE_ROOT/repos/$repo/" \
-      "$TARGET_ROOT/repos/$repo/"
+    rsync -a --exclude '.venv' --exclude '__pycache__' "$SOURCE_ROOT/repos/$repo/" "$TARGET_ROOT/repos/$repo/"
   else
     note "no repos/$repo found; skipping"
   fi
 done
 
-note "updating standalone settings to use migrated local data"
+note "updating standalone settings"
 python3 - "$TARGET_ROOT/.tactile_webui/settings.json" <<'PY'
 import json
 import sys
@@ -167,24 +155,26 @@ if path.is_file():
         pass
 
 data["source_project_root"] = "."
-data["annotations_path"] = "annotations/failure_annotations/records"
+data["annotations_path"] = "annotations/failrecovery/records"
 path.parent.mkdir(parents=True, exist_ok=True)
 path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 PY
 
-note "verifying migrated manifest paths"
+note "verifying dataset-local manifest paths"
 python3 - "$TARGET_ROOT" <<'PY'
 import json
 import sys
 from pathlib import Path
 
 root = Path(sys.argv[1]).resolve()
-manifest = root / "datasets/lf3r_failure_rollouts/failrecovery_manifest.jsonl"
-legacy_prefix = "datasets/lf3r_failure_rollouts/v1/"
+manifest = root / "datasets/failrecovery/manifest.jsonl"
 text = manifest.read_text(encoding="utf-8")
-
-if legacy_prefix in text:
-    raise SystemExit("legacy /v1/ path remains in migrated manifest")
+for legacy in (
+    "datasets/lf3r_failure_rollouts/v1/",
+    "datasets/lf3r_failure_rollouts/",
+):
+    if legacy in text:
+        raise SystemExit(f"legacy path remains in migrated manifest: {legacy}")
 
 missing = []
 rows = 0
@@ -193,16 +183,13 @@ for line in text.splitlines():
         continue
     row = json.loads(line)
     rows += 1
-
     for value in (row.get("camera_video_paths") or {}).values():
         if value and not (root / value).is_file():
             missing.append(value)
-
     for key in ("synchronized_frames_path", "tactile_events_path"):
         value = row.get(key)
         if value and not (root / value).is_file():
             missing.append(value)
-
     for entry in (row.get("tactile_stream_paths") or {}).values():
         if not isinstance(entry, dict):
             continue
@@ -213,16 +200,19 @@ for line in text.splitlines():
 if missing:
     preview = "\n  ".join(missing[:20])
     raise SystemExit(f"{len(missing)} referenced files are missing:\n  {preview}")
-
 print(f"verified {rows} rollouts; every WebUI runtime file exists")
 PY
 
+# Remove only the obsolete standalone layout after the canonical copy verifies.
+rm -rf "$TARGET_ROOT/datasets/lf3r_failure_rollouts"
+rm -rf "$TARGET_ROOT/annotations/failure_annotations"
+
 note "migration complete"
 printf '\nStandalone layout:\n'
-printf '  datasets/lf3r_failure_rollouts/failrecovery_manifest.jsonl\n'
-printf '  datasets/lf3r_failure_rollouts/failrecovery/\n'
-printf '  annotations/failure_annotations/records/\n'
-printf '  annotations/failure_annotations/events/\n'
+printf '  datasets/failrecovery/manifest.jsonl\n'
+printf '  datasets/failrecovery/<episode files/directories...>\n'
+printf '  annotations/failrecovery/records/\n'
+printf '  annotations/failrecovery/events/\n'
 printf '  outputs/usb_event_intervals/\n'
 printf '  checkpoints/T-Rex/encoders/\n'
 printf '  repos/T-Rex/\n'

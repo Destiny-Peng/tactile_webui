@@ -253,16 +253,6 @@ h1 { margin-top: .1rem; font-size: 1.15rem; }
   border: 1px solid var(--line-soft);
   border-radius: .4rem;
 }
-.tactile-sprite {
-  background-image: var(--tactile-sprite-url);
-  background-repeat: no-repeat;
-  background-size: 500% 100%;
-}
-.tactile-sprite.finger-0 { background-position: 0% 50%; }
-.tactile-sprite.finger-1 { background-position: 25% 50%; }
-.tactile-sprite.finger-2 { background-position: 50% 50%; }
-.tactile-sprite.finger-3 { background-position: 75% 50%; }
-.tactile-sprite.finger-4 { background-position: 100% 50%; }
 .placeholder { display: grid; place-items: center; min-height: 4rem; color: var(--muted); font-size: .62rem; }
 .finger-meta { margin-top: .35rem; overflow: hidden; color: var(--muted); font: 500 .56rem/1.35 "SFMono-Regular", Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .f6 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .16rem .3rem; margin-top: .35rem; font: 500 .55rem/1.25 "SFMono-Regular", Consolas, monospace; }

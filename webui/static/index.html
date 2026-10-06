@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tactile WebUI</title>
+  <meta name="description" content="Standalone SHARPA tactile annotation and experiment workspace">
+  <link rel="stylesheet" href="/static/shell.css">
+  <script src="/static/shell.js" defer></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand-block">
+      <div class="brand-mark">T</div>
+      <div>
+        <div class="eyebrow">SHARPA</div>
+        <div class="brand-title">Tactile WebUI</div>
+      </div>
+    </div>
+    <nav class="nav" aria-label="Workspace">
+      <button class="nav-item active" data-view="annotate" type="button">Annotate</button>
+      <button class="nav-item" data-view="results" type="button">Results</button>
+      <button class="nav-item" data-view="runs" type="button">Runs</button>
+      <button class="nav-item" data-view="analysis" type="button">Analysis</button>
+      <button class="nav-item" data-view="settings" type="button">Settings</button>
+    </nav>
+    <div class="sidebar-footer">
+      <span id="globalStatus" class="status-dot"></span>
+      <span id="globalStatusText">Connecting…</span>
+    </div>
+  </aside>
+
+  <main class="workspace">
+    <header class="workspace-header">
+      <div>
+        <p class="eyebrow">TACTILE DATA OPERATIONS</p>
+        <h1 id="pageTitle">Annotate</h1>
+      </div>
+      <div class="header-meta">
+        <span id="datasetStatus" class="pill">Loading dataset…</span>
+        <span id="annotationStatus" class="pill subtle">Annotations</span>
+      </div>
+    </header>
+
+    <section id="view-annotate" class="view active-view">
+      <div class="annotate-layout">
+        <aside class="panel catalog-panel">
+          <div class="panel-heading compact-heading">
+            <div><p class="eyebrow">DATASET</p><h2>Rollouts</h2></div>
+            <span id="annotateVisibleCount" class="count-chip">0</span>
+          </div>
+          <input id="annotateSearch" class="text-input" type="search" placeholder="Search rollout or task…" autocomplete="off">
+          <div class="filter-row">
+            <select id="annotateTaskFilter" class="select-input"><option value="all">All tasks</option></select>
+            <select id="annotateReviewFilter" class="select-input">
+              <option value="all">All review states</option>
+              <option value="complete">Complete</option>
+              <option value="unreviewed">Unreviewed</option>
+            </select>
+          </div>
+          <div id="annotateRolloutList" class="rollout-list"></div>
+        </aside>
+
+        <section class="annotate-main">
+          <div id="annotateEmpty" class="empty-card">
+            <p class="eyebrow">ANNOTATE</p>
+            <h2>Select a tactile rollout.</h2>
+            <p>The annotation schema is limited to Align/Insert × failure/success intervals (keys 6–9).</p>
+          </div>
+
+          <div id="annotateContent" class="hidden">
+            <section class="record-strip panel">
+              <div>
+                <div id="annotateBadges" class="badge-row"></div>
+                <h2 id="annotateTaskTitle">Task</h2>
+                <p id="annotateRecordMeta" class="muted"></p>
+              </div>
+              <div class="row-actions">
+                <button id="annotatePrevious" class="button secondary" type="button">← Previous</button>
+                <button id="annotateNext" class="button secondary" type="button">Next →</button>
+              </div>
+            </section>
+
+            <section class="panel video-panel">
+              <div class="toolbar">
+                <label>Camera <select id="annotateCamera" class="select-input"></select></label>
+                <span id="annotateFrameText" class="mono">Frame 0 / 0</span>
+                <span id="annotateTimeText" class="mono">00:00.000</span>
+              </div>
+              <div class="video-shell"><video id="annotateVideo" preload="metadata" playsinline></video></div>
+              <div class="transport-row">
+                <button id="annotatePlay" class="button primary" type="button">Play</button>
+                <button id="annotateStepBack" class="button secondary" type="button">−1 frame</button>
+                <button id="annotateStepForward" class="button secondary" type="button">+1 frame</button>
+                <input id="annotateFrameSlider" class="frame-slider" type="range" min="0" max="1" step="1" value="0">
+              </div>
+              <div class="annotate-tactile-preview">
+                <div>
+                  <p class="eyebrow">CURRENT TACTILE FRAME</p>
+                  <span id="annotateTactileStatus" class="muted">Waiting for synchronized tactile…</span>
+                </div>
+                <img id="annotateTactileSprite" alt="Five-finger deform tactile sprite">
+              </div>
+            </section>
+
+            <section class="panel interval-panel">
+              <div class="panel-heading">
+                <div><p class="eyebrow">INTERVAL ANNOTATION</p><h2>Align / Insert events</h2></div>
+                <div class="row-actions">
+                  <button id="addInterval" class="button secondary" type="button">+ Add event</button>
+                  <button id="saveIntervals" class="button primary" type="button">Save</button>
+                </div>
+              </div>
+              <div class="shortcut-note">1–4 select type · Q set start · W set end · ↑/↓ active event · ,/. rollout · Space play</div>
+              <div id="intervalList" class="interval-list"></div>
+              <div id="annotationMessage" class="message"></div>
+            </section>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <section id="view-results" class="view">
+      <div class="results-frame-wrap">
+        <iframe id="resultsFrame" title="Tactile Results" src="/static/tactile/index.html?embedded=1"></iframe>
+      </div>
+    </section>
+
+    <section id="view-runs" class="view">
+      <section class="panel page-panel">
+        <div class="panel-heading">
+          <div><p class="eyebrow">SHARPA EXPERIMENTS</p><h2>Runs</h2></div>
+          <button id="refreshRuns" class="button secondary" type="button">Refresh</button>
+        </div>
+        <p class="muted">This page only scans standalone tactile outputs. LIBERO, repair and baseline jobs are intentionally absent.</p>
+        <div class="command-card"><code>bash tools/run_sharpa_tactile_ablation.sh &lt;module&gt; [arguments…]</code></div>
+        <div id="runsRoot" class="source-line"></div>
+        <div id="runsList" class="runs-list"></div>
+      </section>
+    </section>
+
+    <section id="view-analysis" class="view">
+      <div id="analysisCards" class="metric-grid"></div>
+      <section class="panel page-panel">
+        <div class="panel-heading">
+          <div><p class="eyebrow">EVENT DISTRIBUTION</p><h2>Four tactile interval types</h2></div>
+          <button id="refreshAnalysis" class="button secondary" type="button">Refresh</button>
+        </div>
+        <div id="eventAnalysisTable"></div>
+      </section>
+      <section class="panel page-panel">
+        <div class="panel-heading"><div><p class="eyebrow">COVERAGE</p><h2>By task</h2></div></div>
+        <div id="taskAnalysisTable"></div>
+      </section>
+    </section>
+
+    <section id="view-settings" class="view">
+      <section class="panel settings-panel">
+        <div class="panel-heading"><div><p class="eyebrow">WORKSPACE</p><h2>Settings</h2></div></div>
+        <form id="settingsForm">
+          <div class="settings-grid">
+            <label class="field"><span>Dataset manifest</span><input id="settingsManifest" class="text-input" readonly></label>
+            <label class="field"><span>Annotation target</span><input id="settingsAnnotations" class="text-input" name="annotations_path"></label>
+            <label class="field"><span>Historical annotation seed glob</span><input id="settingsSeedGlob" class="text-input" name="annotation_seed_glob"></label>
+            <label class="field"><span>Runs root</span><input id="settingsRunsRoot" class="text-input" name="runs_root"></label>
+            <label class="field"><span>Default camera</span><input id="settingsCamera" class="text-input" name="default_camera"></label>
+            <label class="field"><span>Default tactile image</span><select id="settingsKind" class="select-input" name="default_tactile_kind"><option value="deform">Deform</option><option value="raw">Raw</option></select></label>
+            <label class="field"><span>Theme</span><select id="settingsTheme" class="select-input" name="theme"><option value="light">Light</option><option value="dark">Dark</option></select></label>
+          </div>
+          <div class="settings-source"><strong>Currently loaded annotation source:</strong> <span id="settingsSource">None</span></div>
+          <div class="row-actions"><button class="button primary" type="submit">Save settings</button></div>
+          <div id="settingsMessage" class="message"></div>
+        </form>
+      </section>
+    </section>
+  </main>
+</body>
+</html>

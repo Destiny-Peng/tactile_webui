@@ -24,9 +24,15 @@ replace_once(
     '''    state.eventLookup = null;\n    state.lastSyncKey = "";\n    grid.innerHTML = "";''',
     'remove sprite reset',
 )
-start = app.read_text(encoding='utf-8').index('  function spriteUrl(')
-end = app.read_text(encoding='utf-8').index('  function formatAxisNumber(', start)
+replace_once(
+    app,
+    '''        state.eventLookup = buildEventLookup(state.series);\n        state.lastSyncKey = "";\n        state.appliedSpriteKey = "";\n        state.requestedSpriteKey = "";\n        renderCurve();''',
+    '''        state.eventLookup = buildEventLookup(state.series);\n        state.lastSyncKey = "";\n        renderCurve();''',
+    'remove series sprite reset',
+)
 text = app.read_text(encoding='utf-8')
+start = text.index('  function spriteUrl(')
+end = text.index('  function formatAxisNumber(', start)
 app.write_text(text[:start] + text[end:], encoding='utf-8')
 replace_once(
     app,

@@ -1,0 +1,42 @@
+name: Apply dataset-unit refactor
+
+on:
+  push:
+    branches: [refactor/dataset-units]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refactor/dataset-units
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply refactor
+        run: python tools/apply_dataset_unit_refactor.py
+      - name: Validate
+        run: |
+          python -m compileall -q webui tools/sharpa_tactile
+          bash -n tools/migrate_from_lf3r.sh
+          node --check webui/static/shell.js
+          node --check webui/static/tactile/app.js
+          python -m unittest discover -s webui/tests -v
+      - name: Commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add README.md webui tools
+          if git diff --cached --quiet; then
+            echo 'No changes to commit.'
+          else
+            git commit -m 'Refactor standalone layout by dataset [skip ci]'
+            git push origin HEAD:refactor/dataset-units
+          fi

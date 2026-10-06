@@ -37,7 +37,7 @@ class TactileServiceTest(unittest.TestCase):
                 'tactile_events_path': f'{rid}/events.jsonl',
                 'tactile_stream_paths': {'thumb': {'raw': f'{rid}/raw.bin'}},
             })
-        self.manifest = self.root / 'datasets/lf3r_failure_rollouts/v1/failrecovery_manifest.jsonl'
+        self.manifest = self.root / 'datasets/lf3r_failure_rollouts/failrecovery_manifest.jsonl'
         self.manifest.parent.mkdir(parents=True)
         self.manifest.write_text(''.join(json.dumps(r) + '\n' for r in self.rows))
 

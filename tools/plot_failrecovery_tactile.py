@@ -50,7 +50,7 @@ def read_series(record: dict) -> tuple[dict, dict]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--manifest", type=Path, default=PROJECT_ROOT / "datasets/lf3r_failure_rollouts/v1/failrecovery_manifest.jsonl")
+    parser.add_argument("--manifest", type=Path, default=PROJECT_ROOT / "datasets/lf3r_failure_rollouts/failrecovery_manifest.jsonl")
     parser.add_argument("--task-key", default="usb_socket")
     parser.add_argument("--min-y-span", type=float, default=1.0,
                         help="Minimum F magnitude axis span (default: 1).")

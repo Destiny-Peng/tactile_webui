@@ -40,7 +40,7 @@ def main():
     tm=json.loads((source/'training_manifest.json').read_text());dataset=ROOT/tm['source'];dm=json.loads((dataset/'dataset_manifest.json').read_text())
     assert all(sha(ROOT/p)==v for p,v in tm['input_hashes'].items())
     selections=json.loads((source/'sigma_selection.json').read_text());results=json.loads((source/'results.json').read_text())
-    manifest={r['id']:r for r in map(json.loads,(ROOT/'datasets/lf3r_failure_rollouts/v1/failrecovery_manifest.jsonl').read_text().splitlines())}
+    manifest={r['id']:r for r in map(json.loads,(ROOT/'datasets/lf3r_failure_rollouts/failrecovery_manifest.jsonl').read_text().splitlines())}
     fps={manifest[r['rollout_id']]['fps'] for r in dm['records']};assert fps=={30.0};hz=30.0
     hashes={str(p.relative_to(ROOT)):sha(p) for p in (source/'results.json',source/'sigma_selection.json',dataset/'dataset_manifest.json',Path(__file__))}
     torch.set_num_threads(4);all_rows=[];statistics={};population=[];replay_errors=[]

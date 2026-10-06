@@ -1,0 +1,4 @@
+html.embedded .topbar { display: none; }
+html.embedded body { min-height: 100vh; }
+html.embedded .layout { min-height: 100vh; }
+html.embedded .catalog { top: 0; max-height: 100vh; }

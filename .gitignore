@@ -4,6 +4,7 @@ __pycache__/
 venv/
 .env
 .DS_Store
+.tactile_webui/
 
 # Local data / weights / external repos
 datasets/

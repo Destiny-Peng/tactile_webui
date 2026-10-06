@@ -37,6 +37,7 @@ EVENT_TYPES: dict[int, dict[str, str]] = {
 }
 
 DEFAULT_SETTINGS: dict[str, Any] = {
+    "source_project_root": ".",
     "annotations_path": "annotations/failure_annotations/v1/records",
     "annotation_seed_glob": "outputs/usb_event_intervals/*/intervals.jsonl",
     "runs_root": "outputs",
@@ -50,21 +51,38 @@ class TactileApplication:
     def __init__(self, root: Path) -> None:
         self.root = root.resolve()
         self.static_root = (Path(__file__).resolve().parent / "static").resolve()
+        self.settings_path = self.root / ".tactile_webui" / "settings.json"
+        self._settings = self._load_settings()
+        self._rollouts: list[dict[str, Any]] | None = None
+        self._rollout_map: dict[str, dict[str, Any]] | None = None
+        self._annotation_lock = threading.RLock()
+        self._configure_data_source()
+
+    # ---------- generic filesystem helpers ----------
+
+    def _configure_data_source(self) -> None:
+        raw = str(self._settings.get("source_project_root") or ".").strip()
+        source = Path(raw).expanduser()
+        if not source.is_absolute():
+            source = self.root / source
+        self.source_root = source.resolve()
         self.manifest_path = (
-            self.root
+            self.source_root
             / "datasets"
             / "lf3r_failure_rollouts"
             / "v1"
             / "failrecovery_manifest.jsonl"
         )
-        self.settings_path = self.root / ".tactile_webui" / "settings.json"
-        self._settings = self._load_settings()
-        self.tactile = FailRecoveryTactileService(self.root)
-        self._rollouts: list[dict[str, Any]] | None = None
-        self._rollout_map: dict[str, dict[str, Any]] | None = None
-        self._annotation_lock = threading.RLock()
+        self.tactile = FailRecoveryTactileService(self.source_root, self.manifest_path)
+        self._rollouts = None
+        self._rollout_map = None
 
-    # ---------- generic filesystem helpers ----------
+    @staticmethod
+    def _display_path(path: Path, base: Path) -> str:
+        try:
+            return str(path.relative_to(base))
+        except ValueError:
+            return str(path)
 
     def project_file(self, value: Any, suffix: str | None = None) -> Path:
         if not isinstance(value, str) or not value.strip():
@@ -74,6 +92,19 @@ class TactileApplication:
             path.relative_to(self.root)
         except ValueError as exc:
             raise ValueError("path escapes repository root") from exc
+        if suffix and path.suffix.lower() != suffix.lower():
+            raise ValueError(f"expected {suffix} file")
+        return path
+
+    def source_file(self, value: Any, suffix: str | None = None) -> Path:
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("missing source-project-relative path")
+        raw = Path(value).expanduser()
+        path = raw.resolve() if raw.is_absolute() else (self.source_root / raw).resolve()
+        try:
+            path.relative_to(self.source_root)
+        except ValueError as exc:
+            raise ValueError("source data path escapes source project root") from exc
         if suffix and path.suffix.lower() != suffix.lower():
             raise ValueError(f"expected {suffix} file")
         return path
@@ -129,7 +160,16 @@ class TactileApplication:
             if key not in payload:
                 continue
             value = payload[key]
-            if key in {"annotations_path", "annotation_seed_glob", "runs_root"}:
+            if key == "source_project_root":
+                if not isinstance(value, str) or not value.strip():
+                    raise ValueError("source_project_root must be a non-empty path")
+                candidate = Path(value).expanduser()
+                if not candidate.is_absolute():
+                    candidate = self.root / candidate
+                if not candidate.resolve().is_dir():
+                    raise ValueError("source_project_root does not exist or is not a directory")
+                settings[key] = value.strip()
+            elif key in {"annotations_path", "annotation_seed_glob", "runs_root"}:
                 if not isinstance(value, str) or not value.strip():
                     raise ValueError(f"{key} must be a non-empty relative path")
                 if Path(value).is_absolute() or ".." in Path(value).parts:
@@ -145,8 +185,11 @@ class TactileApplication:
                 if value not in {"light", "dark"}:
                     raise ValueError("theme must be light or dark")
                 settings[key] = value
+        source_changed = settings.get("source_project_root") != self._settings.get("source_project_root")
         self._settings = settings
         self._atomic_text(self.settings_path, json.dumps(settings, indent=2, ensure_ascii=False) + "\n")
+        if source_changed:
+            self._configure_data_source()
         return self.settings
 
     # ---------- rollout manifest ----------
@@ -158,7 +201,7 @@ class TactileApplication:
         if self.manifest_path.is_file():
             for value in self._read_jsonl(self.manifest_path):
                 row = dict(value)
-                row.setdefault("manifest_source", str(self.manifest_path.relative_to(self.root)))
+                row.setdefault("manifest_source", self._display_path(self.manifest_path, self.source_root))
                 row.setdefault("manifest_label", "failrecovery")
                 row.setdefault("source_kind", "real_robot")
                 row.setdefault("task_description", row.get("instruction") or row.get("task_key") or "Tactile task")
@@ -188,7 +231,7 @@ class TactileApplication:
     def annotation_seed_path(self) -> Path | None:
         pattern = str(self._settings["annotation_seed_glob"])
         candidates = sorted(
-            (path for path in self.root.glob(pattern) if path.is_file()),
+            (path for path in self.source_root.glob(pattern) if path.is_file()),
             key=lambda path: (path.stat().st_mtime_ns, str(path)),
         )
         return candidates[-1] if candidates else None
@@ -332,13 +375,13 @@ class TactileApplication:
             "rollouts": rows,
             "manifests": [
                 {
-                    "path": str(self.manifest_path.relative_to(self.root)),
+                    "path": self._display_path(self.manifest_path, self.source_root),
                     "label": "failrecovery",
                     "rollouts": len(rows),
                     "valid": self.manifest_path.is_file(),
                 }
             ],
-            "annotation_source": str(source.relative_to(self.root)) if source else None,
+            "annotation_source": self._display_path(source, self.source_root) if source else None,
             "annotation_target": str(self.annotation_target_path().relative_to(self.root)),
             "event_types": EVENT_TYPES,
         }
@@ -383,7 +426,7 @@ class TactileApplication:
             "events": sum(counter.values()),
             "event_types": type_rows,
             "tasks": sorted(task_rows.values(), key=lambda row: row["task"]),
-            "annotation_source": str(self.annotation_seed_path().relative_to(self.root)) if self.annotation_seed_path() else None,
+            "annotation_source": self._display_path(self.annotation_seed_path(), self.source_root) if self.annotation_seed_path() else None,
             "annotation_target": str(self.annotation_target_path().relative_to(self.root)),
         }
 
@@ -613,9 +656,10 @@ class TactileHandler(BaseHTTPRequestHandler):
                     HTTPStatus.OK,
                     {
                         "settings": self.app.settings,
-                        "manifest_path": str(self.app.manifest_path.relative_to(self.app.root)),
+                        "manifest_path": self.app._display_path(self.app.manifest_path, self.app.source_root),
+                        "source_project_root_resolved": str(self.app.source_root),
                         "manifest_exists": self.app.manifest_path.is_file(),
-                        "annotation_source": str(source.relative_to(self.app.root)) if source else None,
+                        "annotation_source": self.app._display_path(source, self.app.source_root) if source else None,
                         "annotation_target": str(self.app.annotation_target_path().relative_to(self.app.root)),
                     },
                 )
@@ -636,7 +680,7 @@ class TactileHandler(BaseHTTPRequestHandler):
                     return
                 camera = self._camera_for_rollout(rollout, query, self.app.settings["default_camera"])
                 camera_paths = rollout.get("camera_video_paths") or {}
-                self.serve_video(self.app.project_file(camera_paths.get(camera), ".mp4"))
+                self.serve_video(self.app.source_file(camera_paths.get(camera), ".mp4"))
                 return
             if path.startswith("/api/tactile/"):
                 parts = path.strip("/").split("/")

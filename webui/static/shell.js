@@ -482,7 +482,10 @@ async function loadSettings() {
     var settings = payload.settings || {};
     state.settings = settings;
     applyTheme(settings.theme);
-    byId("settingsManifest").value = payload.manifest_path || "";
+    byId("settingsSourceRoot").value = settings.source_project_root || ".";
+    byId("settingsManifest").value = payload.source_project_root_resolved
+      ? payload.source_project_root_resolved + "/" + (payload.manifest_path || "")
+      : (payload.manifest_path || "");
     byId("settingsAnnotations").value = settings.annotations_path || "";
     byId("settingsSeedGlob").value = settings.annotation_seed_glob || "";
     byId("settingsRunsRoot").value = settings.runs_root || "";
@@ -498,6 +501,7 @@ async function loadSettings() {
 async function saveSettings(event) {
   event.preventDefault();
   var payload = {
+    source_project_root: byId("settingsSourceRoot").value.trim(),
     annotations_path: byId("settingsAnnotations").value.trim(),
     annotation_seed_glob: byId("settingsSeedGlob").value.trim(),
     runs_root: byId("settingsRunsRoot").value.trim(),

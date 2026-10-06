@@ -63,6 +63,25 @@ class WorkspaceAnnotationTest(unittest.TestCase):
         self.assertEqual(json.loads(legacy.read_text())["notes"], "keep me")
         self.assertTrue((records / "usb_001.tactile.json").is_file())
 
+    def test_external_source_project_root_resolves_manifest_paths(self):
+        temporary, app = self.make_app()
+        self.addCleanup(temporary.cleanup)
+        external = app.root / "old_project"
+        manifest = external / "datasets/lf3r_failure_rollouts/v1/failrecovery_manifest.jsonl"
+        manifest.parent.mkdir(parents=True)
+        video = external / "datasets/shared/video.mp4"
+        video.parent.mkdir(parents=True)
+        video.write_bytes(b"video")
+        manifest.write_text(json.dumps({
+            "id": "usb_external", "task_key": "usb_insert", "total_frames": 1, "fps": 30,
+            "camera_video_paths": {"cam_high": "datasets/shared/video.mp4"}
+        }) + "\n")
+        app.save_settings({**app.settings, "source_project_root": str(external)})
+        self.assertEqual(app.manifest_path, manifest.resolve())
+        self.assertEqual(app.source_file("datasets/shared/video.mp4"), video.resolve())
+        self.assertIn("usb_external", app.rollout_map())
+
+
     def test_rejects_invalid_interval(self):
         temporary, app = self.make_app()
         self.addCleanup(temporary.cleanup)

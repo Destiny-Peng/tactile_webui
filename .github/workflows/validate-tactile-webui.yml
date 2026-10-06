@@ -7,7 +7,8 @@ on:
   pull_request:
     paths:
       - 'webui/**'
-      - 'tools/sharpa_tactile/**'
+      - 'tools/**'
+      - 'README.md'
       - '.github/workflows/validate-tactile-webui.yml'
 
 permissions:
@@ -25,7 +26,9 @@ jobs:
         with:
           node-version: '22'
       - name: Python syntax
-        run: python -m compileall -q webui tools/sharpa_tactile
+        run: python -m compileall -q webui tools/sharpa_tactile tools/export_failrecovery_media.py tools/plot_failrecovery_tactile.py
+      - name: Shell syntax
+        run: bash -n tools/migrate_from_lf3r.sh
       - name: JavaScript syntax
         run: |
           node --check webui/static/shell.js

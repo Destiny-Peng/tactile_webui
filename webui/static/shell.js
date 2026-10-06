@@ -1,6 +1,7 @@
 "use strict";
 
 var LABEL_KEYS = [6, 7, 8, 9];
+var TACTILE_FINGERS = ["thumb", "index", "middle", "ring", "pinky"];
 var state = {
   view: "annotate",
   rollouts: [],
@@ -15,6 +16,10 @@ var state = {
   annotationTarget: null,
   videoGeneration: 0,
   tactileGeneration: 0,
+  tactileSeries: null,
+  tactileSeriesKey: "",
+  tactileSeriesPromise: null,
+  tactileAppliedKey: "",
   results: {
     sources: [], selectedSource: "", selectedId: "", currentFrame: 0,
     points: [], videoGeneration: 0
@@ -269,6 +274,10 @@ function selectRollout(id) {
   state.events = (record.annotation_events || []).map(function (event) { return Object.assign({}, event); });
   state.activeEvent = state.events.length ? 0 : null;
   state.dirty = false;
+  state.tactileSeries = null;
+  state.tactileSeriesKey = "";
+  state.tactileSeriesPromise = null;
+  state.tactileAppliedKey = "";
   byId("annotateEmpty").classList.add("hidden");
   byId("annotateContent").classList.remove("hidden");
   renderRolloutList();
@@ -340,20 +349,87 @@ function updateFrameUi(frame, forceTactile) {
   updateTimelinePlayhead("annotateTimeline", value, record.total_frames);
   if (changed || forceTactile) updateAnnotateTactile(value);
 }
-function updateAnnotateTactile(frame) {
+function annotateTactileImageUrl(record, finger, eventId, kind) {
+  return "/api/tactile/" + encodeURIComponent(record.id) + "/image?finger=" + encodeURIComponent(finger)
+    + "&event_id=" + encodeURIComponent(eventId) + "&kind=" + encodeURIComponent(kind);
+}
+function nearestAnnotateTactileSync(series, frame) {
+  var rows = series && Array.isArray(series.sync_frames) ? series.sync_frames : [];
+  if (!rows.length) return null;
+  var low = 0, high = rows.length - 1;
+  while (low <= high) {
+    var mid = (low + high) >> 1;
+    var value = Number(rows[mid].frame);
+    if (value < frame) low = mid + 1; else if (value > frame) high = mid - 1; else return rows[mid];
+  }
+  if (low <= 0) return rows[0];
+  if (low >= rows.length) return rows[rows.length - 1];
+  return Math.abs(frame - Number(rows[low - 1].frame)) <= Math.abs(Number(rows[low].frame) - frame) ? rows[low - 1] : rows[low];
+}
+function ensureAnnotateTactileSeries(record, camera) {
+  var key = record.id + "|" + camera;
+  if (state.tactileSeriesKey === key && state.tactileSeries) return Promise.resolve(state.tactileSeries);
+  if (state.tactileSeriesKey === key && state.tactileSeriesPromise) return state.tactileSeriesPromise;
+  state.tactileSeriesKey = key;
+  state.tactileSeries = null;
+  state.tactileAppliedKey = "";
+  state.tactileSeriesPromise = jsonRequest("/api/tactile/" + encodeURIComponent(record.id) + "/series?camera=" + encodeURIComponent(camera))
+    .then(function (payload) {
+      if (state.tactileSeriesKey !== key) return null;
+      state.tactileSeries = payload.tactile || null;
+      return state.tactileSeries;
+    }).catch(function (error) {
+      if (state.tactileSeriesKey === key) byId("annotateTactileStatus").textContent = "Tactile timeline unavailable: " + String(error.message || error);
+      return null;
+    }).finally(function () {
+      if (state.tactileSeriesKey === key) state.tactileSeriesPromise = null;
+    });
+  return state.tactileSeriesPromise;
+}
+async function updateAnnotateTactile(frame) {
   var record = selectedRollout();
   if (!record) return;
   var camera = byId("annotateCamera").value || chooseCamera(record);
   var kind = state.settings && state.settings.default_tactile_kind || "deform";
   var generation = ++state.tactileGeneration;
-  var image = byId("annotateTactileSprite");
-  image.onload = function () { if (generation === state.tactileGeneration) byId("annotateTactileStatus").textContent = camera + " · frame " + frame + " · " + kind; };
-  image.onerror = function () { if (generation === state.tactileGeneration) byId("annotateTactileStatus").textContent = "No synchronized tactile at this frame"; };
-  image.src = "/api/tactile/" + encodeURIComponent(record.id) + "/sprite?camera=" + encodeURIComponent(camera) + "&frame=" + frame + "&kind=" + encodeURIComponent(kind);
-  for (var offset = 1; offset <= 2; offset += 1) {
-    var preload = new Image();
-    preload.src = "/api/tactile/" + encodeURIComponent(record.id) + "/sprite?camera=" + encodeURIComponent(camera) + "&frame=" + clampFrame(frame + offset) + "&kind=" + encodeURIComponent(kind);
+  var series = await ensureAnnotateTactileSeries(record, camera);
+  if (generation !== state.tactileGeneration || !series) return;
+  var sync = nearestAnnotateTactileSync(series, frame);
+  if (!sync) { byId("annotateTactileStatus").textContent = "No synchronized tactile at this frame"; return; }
+  var fingerRows = sync.fingers || {};
+  var key = record.id + "|" + camera + "|" + sync.frame + "|" + kind + "|"
+    + TACTILE_FINGERS.map(function (finger) { return fingerRows[finger] && fingerRows[finger].event_id != null ? fingerRows[finger].event_id : "-"; }).join(",");
+  if (key === state.tactileAppliedKey) return;
+  byId("annotateTactileStatus").textContent = camera + " · video " + frame + " → tactile " + sync.frame + " · loading " + kind;
+  var cells = [];
+  var loads = [];
+  TACTILE_FINGERS.forEach(function (finger) {
+    var info = fingerRows[finger] || {};
+    if (info.event_id == null) { cells.push({ finger: finger, missing: true }); return; }
+    var url = annotateTactileImageUrl(record, finger, info.event_id, kind);
+    cells.push({ finger: finger, url: url });
+    loads.push(new Promise(function (resolve, reject) {
+      var image = new Image();
+      image.onload = resolve;
+      image.onerror = function () { reject(new Error(finger + " tactile image failed")); };
+      image.src = url;
+    }));
+  });
+  try {
+    await Promise.all(loads);
+  } catch (error) {
+    if (generation !== state.tactileGeneration) return;
+    byId("annotateTactileStatus").textContent = "Tactile image load failed; keeping previous frame";
+    queueTelemetry({ event: "tactile_image_error", level: "error", rollout_id: record.id, camera: camera, frame: frame, matched_frame: sync.frame, kind: kind, message: String(error.message || error) });
+    return;
   }
+  if (generation !== state.tactileGeneration) return;
+  byId("annotateTactileGrid").innerHTML = cells.map(function (cell) {
+    return '<div class="annotate-tactile-finger"><strong>' + escapeHtml(cell.finger) + '</strong>'
+      + (cell.missing ? '<div class="tactile-missing">No sample</div>' : '<img src="' + escapeHtml(cell.url) + '" alt="' + escapeHtml(cell.finger + " " + kind) + '">') + '</div>';
+  }).join("");
+  state.tactileAppliedKey = key;
+  byId("annotateTactileStatus").textContent = camera + " · video " + frame + " → tactile " + sync.frame + " · " + kind;
 }
 function togglePlay() {
   var video = byId("annotateVideo");
@@ -654,7 +730,7 @@ function bindEvents() {
   document.querySelectorAll(".nav-item").forEach(function (button) { button.addEventListener("click", function () { switchView(button.dataset.view); }); });
   byId("annotateSearch").addEventListener("input", filterRollouts); byId("annotateTaskFilter").addEventListener("change", filterRollouts); byId("annotateReviewFilter").addEventListener("change", filterRollouts);
   byId("annotatePrevious").addEventListener("click", function () { navigateRollout(-1); }); byId("annotateNext").addEventListener("click", function () { navigateRollout(1); });
-  byId("annotateCamera").addEventListener("change", function () { loadAnnotateVideo(); seekFrame(0); }); byId("annotatePlay").addEventListener("click", togglePlay); byId("annotateStepBack").addEventListener("click", function () { seekFrame(state.currentFrame - 1); }); byId("annotateStepForward").addEventListener("click", function () { seekFrame(state.currentFrame + 1); }); byId("annotateFrameSlider").addEventListener("input", function (event) { seekFrame(event.target.value); });
+  byId("annotateCamera").addEventListener("change", function () { state.tactileSeries = null; state.tactileSeriesKey = ""; state.tactileSeriesPromise = null; state.tactileAppliedKey = ""; loadAnnotateVideo(); seekFrame(0); }); byId("annotatePlay").addEventListener("click", togglePlay); byId("annotateStepBack").addEventListener("click", function () { seekFrame(state.currentFrame - 1); }); byId("annotateStepForward").addEventListener("click", function () { seekFrame(state.currentFrame + 1); }); byId("annotateFrameSlider").addEventListener("input", function (event) { seekFrame(event.target.value); });
   byId("annotateVideo").addEventListener("play", function () { byId("annotatePlay").textContent = "Pause"; }); byId("annotateVideo").addEventListener("pause", function () { byId("annotatePlay").textContent = "Play"; }); byId("annotateVideo").addEventListener("timeupdate", function () { var record = selectedRollout(); if (record) updateFrameUi(Math.round(byId("annotateVideo").currentTime * (Number(record.fps) || 30)), false); });
   byId("addInterval").addEventListener("click", function () { addInterval(6); }); byId("saveIntervals").addEventListener("click", saveIntervals);
   byId("resultsSource").addEventListener("change", loadResultsCurve); byId("resultsRollout").addEventListener("change", loadResultsCurve); byId("resultsCamera").addEventListener("change", function () { loadResultsVideo(); seekResultsFrame(0); }); byId("refreshResults").addEventListener("click", function () { loadResultsSources(true); }); byId("resultsPlay").addEventListener("click", toggleResultsPlay); byId("resultsStepBack").addEventListener("click", function () { seekResultsFrame(state.results.currentFrame - 1); }); byId("resultsStepForward").addEventListener("click", function () { seekResultsFrame(state.results.currentFrame + 1); }); byId("resultsFrameSlider").addEventListener("input", function (event) { seekResultsFrame(event.target.value); }); byId("resultsVideo").addEventListener("play", function () { byId("resultsPlay").textContent = "Pause"; }); byId("resultsVideo").addEventListener("pause", function () { byId("resultsPlay").textContent = "Play"; }); byId("resultsVideo").addEventListener("timeupdate", function () { var record = resultRollout(); if (record) updateResultsFrame(Math.round(byId("resultsVideo").currentTime * (Number(record.fps) || 30))); });

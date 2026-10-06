@@ -23,10 +23,6 @@
     eventLookup: null,
     currentFrame: 0,
     lastSyncKey: "",
-    appliedSpriteKey: "",
-    requestedSpriteKey: "",
-    spriteSerial: 0,
-    spritePreloads: new Map(),
     videoFrameCallbackId: 0,
     animationFrameId: 0
   };
@@ -211,9 +207,6 @@
     state.seriesSerial += 1;
     state.eventLookup = null;
     state.lastSyncKey = "";
-    state.appliedSpriteKey = "";
-    state.requestedSpriteKey = "";
-    state.spriteSerial += 1;
     grid.innerHTML = "";
     curveNode.innerHTML = '<div class="placeholder">Loading f6 history…</div>';
     statusNode.textContent = "Loading tactile timeline…";
@@ -331,7 +324,14 @@
     }).join("");
   }
 
-  function renderFinger(finger, data, kind) {
+  function tactileImageUrl(record, finger, eventId, kind) {
+    return "/api/tactile/" + encodeURIComponent(record.id) + "/image"
+      + "?finger=" + encodeURIComponent(finger)
+      + "&event_id=" + encodeURIComponent(eventId)
+      + "&kind=" + encodeURIComponent(kind);
+  }
+
+  function renderFinger(record, finger, data, kind) {
     if (!data) {
       return '<article class="finger-card"><header><strong>' + escapeHtml(LABELS[finger])
         + '</strong><span class="chip">missing</span></header><div class="tactile-image placeholder">No sample</div></article>';
@@ -341,10 +341,9 @@
     var invalid = data.valid === false;
     var stale = data.stale === true;
     var age = Number(data.age_ms);
-    var fingerIndex = FINGERS.indexOf(finger);
     var image = hasImage
-      ? '<div class="tactile-image tactile-sprite finger-' + fingerIndex + '" role="img" aria-label="'
-        + escapeHtml(LABELS[finger]) + ' tactile ' + escapeHtml(kind) + '"></div>'
+      ? '<img class="tactile-image" loading="eager" src="' + escapeHtml(tactileImageUrl(record, finger, data.event_id, kind)) + '" alt="'
+        + escapeHtml(LABELS[finger]) + ' tactile ' + escapeHtml(kind) + '">'
       : '<div class="tactile-image placeholder">No image</div>';
     return '<article class="finger-card' + (invalid ? ' is-invalid' : '') + (stale ? ' is-stale' : '') + '">'
       + '<header><strong>' + escapeHtml(LABELS[finger]) + '</strong><span class="chips">'
@@ -355,60 +354,6 @@
       + '<div class="finger-meta">event ' + escapeHtml(data.event_id == null ? "—" : data.event_id)
       + (Number.isFinite(age) ? ' · ' + age.toFixed(1) + ' ms' : '') + '</div>'
       + '<div class="f6">' + formatF6(data.f6) + '</div></article>';
-  }
-
-  function spriteUrl(record, camera, frame, kind) {
-    return "/api/tactile/" + encodeURIComponent(record.id) + "/sprite"
-      + "?camera=" + encodeURIComponent(camera)
-      + "&frame=" + encodeURIComponent(frame)
-      + "&kind=" + encodeURIComponent(kind);
-  }
-
-  function preloadSprite(url, key) {
-    if (state.spritePreloads.has(key)) return state.spritePreloads.get(key);
-    var promise = new Promise(function (resolve, reject) {
-      var image = new Image();
-      image.onload = function () { resolve(url); };
-      image.onerror = function () { reject(new Error("Tactile sprite failed to load")); };
-      image.src = url;
-    });
-    state.spritePreloads.set(key, promise);
-    if (state.spritePreloads.size > 40) {
-      var first = state.spritePreloads.keys().next();
-      if (!first.done) state.spritePreloads.delete(first.value);
-    }
-    return promise;
-  }
-
-  function prefetchFollowingSprites(record, camera, syncIndex, kind) {
-    var rows = state.series && Array.isArray(state.series.sync_frames) ? state.series.sync_frames : [];
-    for (var offset = 1; offset <= 3; offset += 1) {
-      var row = rows[syncIndex + offset];
-      if (!row) break;
-      var frame = Number(row.frame);
-      var key = record.id + "|" + camera + "|" + frame + "|" + kind;
-      preloadSprite(spriteUrl(record, camera, frame, kind), key).catch(function () {});
-    }
-  }
-
-  function applySprite(record, camera, matchedFrame, syncIndex, kind) {
-    var key = record.id + "|" + camera + "|" + matchedFrame + "|" + kind;
-    if (state.appliedSpriteKey === key || state.requestedSpriteKey === key) {
-      prefetchFollowingSprites(record, camera, syncIndex, kind);
-      return;
-    }
-    state.requestedSpriteKey = key;
-    var serial = ++state.spriteSerial;
-    var url = spriteUrl(record, camera, matchedFrame, kind);
-    prefetchFollowingSprites(record, camera, syncIndex, kind);
-    preloadSprite(url, key).then(function () {
-      if (serial !== state.spriteSerial || state.requestedSpriteKey !== key) return;
-      grid.style.setProperty("--tactile-sprite-url", 'url("' + url.replace(/"/g, "%22") + '")');
-      state.appliedSpriteKey = key;
-    }).catch(function () {
-      if (serial !== state.spriteSerial) return;
-      statusNode.textContent += " · tactile image unavailable";
-    });
   }
 
   function formatAxisNumber(value) {
@@ -515,8 +460,6 @@
         state.series = body.tactile;
         state.eventLookup = buildEventLookup(state.series);
         state.lastSyncKey = "";
-        state.appliedSpriteKey = "";
-        state.requestedSpriteKey = "";
         renderCurve();
         return state.series;
       } catch (error) {
@@ -558,10 +501,8 @@
       + " → sync frame " + syncRow.frame
       + " · row " + syncRow.sync_row + " · " + completeText;
     grid.innerHTML = FINGERS.map(function (finger) {
-      return renderFinger(finger, currentFingerData(syncRow, finger), kind);
+      return renderFinger(record, finger, currentFingerData(syncRow, finger), kind);
     }).join("");
-    state.appliedSpriteKey = "";
-    applySprite(record, camera, Number(syncRow.frame), match.index, kind);
     updateCurvePlayhead(frame);
   }
 
@@ -629,17 +570,12 @@
     state.seriesSerial += 1;
     state.eventLookup = null;
     state.lastSyncKey = "";
-    state.appliedSpriteKey = "";
-    state.requestedSpriteKey = "";
     setVideoSource(record, true);
     await ensureSeries(record, state.camera);
     refreshTactile(state.currentFrame, true);
   });
   byId("kindSelect").addEventListener("change", function () {
     state.lastSyncKey = "";
-    state.appliedSpriteKey = "";
-    state.requestedSpriteKey = "";
-    state.spriteSerial += 1;
     refreshTactile(state.currentFrame, true);
   });
   byId("curveFingerSelect").addEventListener("change", renderCurve);

@@ -25,6 +25,11 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+try:
+    from materialize_tactile_images import image_path as tactile_image_path, png_bytes
+except ImportError:
+    from tools.materialize_tactile_images import image_path as tactile_image_path, png_bytes
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SOURCE_ROOT = Path("/mnt/hdd/qiuxia/datasets/failrecovery")
@@ -195,6 +200,13 @@ def export_tactile(connection: sqlite3.Connection, destination: Path) -> dict[st
             }
             raw_file.write(raw)
             deform_file.write(deform)
+            for kind, data, shape, stream_file in (
+                ("raw", raw, raw_shape, raw_file),
+                ("deform", deform, deform_shape, deform_file),
+            ):
+                image_target = tactile_image_path(Path(stream_file.name), kind, finger, counts[finger])
+                image_target.parent.mkdir(parents=True, exist_ok=True)
+                image_target.write_bytes(png_bytes(data, shape, compression_level=3))
             index.write(json_line(record))
             event_ids.add(row["id"])
             counts[finger] += 1
@@ -327,6 +339,7 @@ def export_episode(
             "videos": video_info, "synchronized": sync,
             "tactile_counts": tactile["counts"],
             "tactile_encoding": "uint8 row-major; byte offsets and shapes in tactile/events.jsonl",
+            "tactile_image_layout": "tactile/images/{raw,deform}/<finger>/<sample_index:06d>.png",
             "tactile_fingers": list(FINGERS),
         }
         (temp_dir / "export.json").write_text(

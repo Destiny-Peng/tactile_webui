@@ -1,0 +1,49 @@
+name: Cleanup static tactile frontend
+
+on:
+  push:
+    branches: [feat/static-tactile-images]
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/static-tactile-images
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply cleanup
+        run: python tools/cleanup_static_tactile_frontend.py
+      - name: Validate
+        run: |
+          python -m compileall -q webui tools
+          node --check webui/static/shell.js
+          node --check webui/static/tactile/app.js
+          bash -n tools/migrate_from_lf3r.sh
+          python -m unittest discover -s webui/tests -v
+          python - <<'PY'
+          from pathlib import Path
+          app = Path('webui/static/tactile/app.js').read_text()
+          assert 'spritePreloads' not in app
+          assert 'applySprite' not in app
+          assert 'requestedSpriteKey' not in app
+          assert 'tactileImageUrl' in app
+          print('dead sprite frontend code removed')
+          PY
+      - name: Commit cleanup
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add webui/static/tactile/app.js webui/static/tactile/styles.css
+          if ! git diff --cached --quiet; then
+            git commit -m 'Remove obsolete tactile sprite frontend code [skip ci]'
+            git push origin HEAD:feat/static-tactile-images
+          fi

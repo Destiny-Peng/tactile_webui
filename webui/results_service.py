@@ -57,15 +57,6 @@ class OnlineResultsService:
             if not probs:
                 continue
             relative = path.relative_to(self.project_root).as_posix()
-            metrics_path = path.parent / "metrics.json"
-            metrics = None
-            if metrics_path.is_file():
-                try:
-                    loaded = json.loads(metrics_path.read_text(encoding="utf-8"))
-                    if isinstance(loaded, dict):
-                        metrics = loaded
-                except (OSError, json.JSONDecodeError):
-                    metrics = None
             rows.append(
                 {
                     "id": relative,
@@ -74,7 +65,6 @@ class OnlineResultsService:
                     "probability_columns": probs,
                     "has_prediction": "prediction" in fields,
                     "preview_rollout": first.get("rollout_id") if first else None,
-                    "metrics": metrics,
                     "modified_at": path.stat().st_mtime,
                 }
             )

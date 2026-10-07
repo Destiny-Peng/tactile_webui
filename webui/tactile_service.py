@@ -31,7 +31,14 @@ class EpisodeTactile:
 class FailRecoveryTactileService:
     """Small, dataset-specific index for failrecovery_manifest.jsonl."""
 
-    def __init__(self, project_root: Path, manifest_path: Path | None = None) -> None:
+    def __init__(
+        self,
+        project_root: Path,
+        manifest_path: Path | None = None,
+        *,
+        episode_cache_limit: int = 2,
+        series_cache_limit: int = 2,
+    ) -> None:
         self.project_root = project_root.expanduser().resolve()
         self.manifest_path = (manifest_path or (
             self.project_root
@@ -43,8 +50,21 @@ class FailRecoveryTactileService:
         # standalone repository and therefore live outside project_root.
         # Only payload paths read from the manifest are constrained to
         # project_root by _project_file().
-        self.episodes: dict[str, EpisodeTactile] = {}
-        self._series_cache: dict[tuple[str, str], dict[str, Any]] = {}
+        # Episode and expanded-series objects are the largest long-lived
+        # allocations in this viewer. Keep only the most recently used pair of
+        # rollouts so memory plateaus while browsing a long dataset.
+        self.episodes: OrderedDict[str, EpisodeTactile] = OrderedDict()
+        self._series_cache: OrderedDict[tuple[str, str], dict[str, Any]] = OrderedDict()
+        self._cache_lock = threading.RLock()
+        self._episode_cache_limit = max(1, int(episode_cache_limit))
+        self._series_cache_limit = max(1, int(series_cache_limit))
+        self._episode_cache_hits = 0
+        self._episode_cache_misses = 0
+        self._episode_cache_evictions = 0
+        self._series_cache_hits = 0
+        self._series_cache_misses = 0
+        self._series_cache_evictions = 0
+        self._series_locks: dict[tuple[str, str], threading.Lock] = {}
         self._sprite_cache: OrderedDict[tuple[str, str, int, str], bytes] = OrderedDict()
         self._sprite_cache_lock = threading.Lock()
         self._sprite_cache_limit = 96
@@ -171,17 +191,68 @@ class FailRecoveryTactileService:
         row = self._manifest_rows.get(rollout_id)
         if row is None:
             raise KeyError("tactile rollout not found")
-        # Separate locks let unrelated episodes load concurrently. Publish an
-        # index only when complete, and reuse it across all tactile endpoints.
-        with self._episode_locks[rollout_id]:
+
+        with self._cache_lock:
             episode = self.episodes.get(rollout_id)
-            if episode is None:
-                try:
-                    episode = self._load_episode(rollout_id, row)
-                except (OSError, ValueError) as exc:
-                    raise KeyError("tactile rollout not found") from exc
+            if episode is not None:
+                self.episodes.move_to_end(rollout_id)
+                self._episode_cache_hits += 1
+                return episode
+
+        # Separate locks let unrelated episodes load concurrently. Recheck
+        # after acquiring the per-episode lock so concurrent first requests
+        # still perform only one JSONL load.
+        with self._episode_locks[rollout_id]:
+            with self._cache_lock:
+                episode = self.episodes.get(rollout_id)
+                if episode is not None:
+                    self.episodes.move_to_end(rollout_id)
+                    self._episode_cache_hits += 1
+                    return episode
+            try:
+                episode = self._load_episode(rollout_id, row)
+            except (OSError, ValueError) as exc:
+                raise KeyError("tactile rollout not found") from exc
+            with self._cache_lock:
+                self._episode_cache_misses += 1
                 self.episodes[rollout_id] = episode
+                self.episodes.move_to_end(rollout_id)
+                while len(self.episodes) > self._episode_cache_limit:
+                    self.episodes.popitem(last=False)
+                    self._episode_cache_evictions += 1
             return episode
+
+    def cache_stats(self) -> dict[str, Any]:
+        with self._cache_lock:
+            episode_stats = {
+                "size": len(self.episodes),
+                "limit": self._episode_cache_limit,
+                "hits": self._episode_cache_hits,
+                "misses": self._episode_cache_misses,
+                "evictions": self._episode_cache_evictions,
+                "rollouts": list(self.episodes.keys()),
+            }
+            series_stats = {
+                "size": len(self._series_cache),
+                "limit": self._series_cache_limit,
+                "hits": self._series_cache_hits,
+                "misses": self._series_cache_misses,
+                "evictions": self._series_cache_evictions,
+                "keys": [
+                    {"rollout_id": rollout_id, "camera": camera}
+                    for rollout_id, camera in self._series_cache.keys()
+                ],
+            }
+        with self._sprite_cache_lock:
+            sprite_stats = {
+                "size": len(self._sprite_cache),
+                "limit": self._sprite_cache_limit,
+            }
+        return {
+            "episodes": episode_stats,
+            "series": series_stats,
+            "sprites": sprite_stats,
+        }
 
     def has_rollout(self, rollout_id: str) -> bool:
         return rollout_id in self._manifest_rows
@@ -261,97 +332,117 @@ class FailRecoveryTactileService:
 
     def series(self, rollout_id: str, camera: str) -> dict[str, Any]:
         cache_key = (rollout_id, camera)
-        cached = self._series_cache.get(cache_key)
-        if cached is not None:
-            return cached
+        with self._cache_lock:
+            cached = self._series_cache.get(cache_key)
+            if cached is not None:
+                self._series_cache.move_to_end(cache_key)
+                self._series_cache_hits += 1
+                return cached
+            series_lock = self._series_locks.setdefault(cache_key, threading.Lock())
 
-        episode = self._episode(rollout_id)
-        frames = episode.camera_frames.get(camera)
-        rows = episode.camera_rows.get(camera)
-        if not frames or not rows:
-            raise KeyError("camera has no tactile synchronization")
+        # Building a series duplicates a sizeable subset of the episode index.
+        # Avoid duplicate builds if several UI requests arrive together.
+        with series_lock:
+            with self._cache_lock:
+                cached = self._series_cache.get(cache_key)
+                if cached is not None:
+                    self._series_cache.move_to_end(cache_key)
+                    self._series_cache_hits += 1
+                    return cached
 
-        finger_series: dict[str, list[dict[str, Any]]] = {
-            finger: [] for finger in FINGERS
-        }
-        sync_frames: list[dict[str, Any]] = []
-        last_event_id: dict[str, str | None] = {
-            finger: None for finger in FINGERS
-        }
-        for video_frame, row_index in zip(frames, rows):
-            row = episode.frames[row_index]
-            tactile = (
-                row.get("tactile")
-                if isinstance(row.get("tactile"), dict)
-                else {}
-            )
-            sync_frame = {
-                "frame": int(video_frame),
-                "sync_row": int(row_index),
-                "complete": row.get("complete"),
-                "fingers": {},
+            episode = self._episode(rollout_id)
+            frames = episode.camera_frames.get(camera)
+            rows = episode.camera_rows.get(camera)
+            if not frames or not rows:
+                raise KeyError("camera has no tactile synchronization")
+
+            finger_series: dict[str, list[dict[str, Any]]] = {
+                finger: [] for finger in FINGERS
             }
-            for finger in FINGERS:
-                sync = (
-                    tactile.get(finger)
-                    if isinstance(tactile.get(finger), dict)
+            sync_frames: list[dict[str, Any]] = []
+            last_event_id: dict[str, str | None] = {
+                finger: None for finger in FINGERS
+            }
+            for video_frame, row_index in zip(frames, rows):
+                row = episode.frames[row_index]
+                tactile = (
+                    row.get("tactile")
+                    if isinstance(row.get("tactile"), dict)
                     else {}
                 )
-                event_id = sync.get("event_id")
-                sync_frame["fingers"][finger] = {
-                    "event_id": event_id,
-                    "valid": sync.get("valid"),
-                    "stale": sync.get("stale"),
-                    "age_ms": sync.get("age_ms"),
+                sync_frame = {
+                    "frame": int(video_frame),
+                    "sync_row": int(row_index),
+                    "complete": row.get("complete"),
+                    "fingers": {},
                 }
-                event_key = None if event_id is None else str(event_id)
-                if event_key is None or event_key == last_event_id[finger]:
-                    continue
-                last_event_id[finger] = event_key
-                event = self._event(episode, finger, event_id)
-                if event is None:
-                    continue
-                f6 = event.get("f6")
-                if not isinstance(f6, list) or not f6:
-                    continue
-                try:
-                    values = [float(value) for value in f6]
-                except (TypeError, ValueError):
-                    continue
-                sync_valid = sync.get("valid")
-                finger_series[finger].append(
-                    {
-                        "frame": int(video_frame),
+                for finger in FINGERS:
+                    sync = (
+                        tactile.get(finger)
+                        if isinstance(tactile.get(finger), dict)
+                        else {}
+                    )
+                    event_id = sync.get("event_id")
+                    sync_frame["fingers"][finger] = {
                         "event_id": event_id,
-                        "f6": values,
-                        "valid": (
-                            event.get("valid")
-                            if sync_valid is None
-                            else sync_valid
-                        ),
+                        "valid": sync.get("valid"),
                         "stale": sync.get("stale"),
                         "age_ms": sync.get("age_ms"),
-                        "image_kinds": [
-                            kind for kind in KINDS
-                            if kind in episode.streams.get(finger, {})
-                            and event.get(kind + "_offset_bytes") is not None
-                            and event.get(kind + "_length_bytes") is not None
-                            and event.get(kind + "_shape") is not None
-                        ],
                     }
-                )
-            sync_frames.append(sync_frame)
+                    event_key = None if event_id is None else str(event_id)
+                    if event_key is None or event_key == last_event_id[finger]:
+                        continue
+                    last_event_id[finger] = event_key
+                    event = self._event(episode, finger, event_id)
+                    if event is None:
+                        continue
+                    f6 = event.get("f6")
+                    if not isinstance(f6, list) or not f6:
+                        continue
+                    try:
+                        values = [float(value) for value in f6]
+                    except (TypeError, ValueError):
+                        continue
+                    sync_valid = sync.get("valid")
+                    finger_series[finger].append(
+                        {
+                            "frame": int(video_frame),
+                            "event_id": event_id,
+                            "f6": values,
+                            "valid": (
+                                event.get("valid")
+                                if sync_valid is None
+                                else sync_valid
+                            ),
+                            "stale": sync.get("stale"),
+                            "age_ms": sync.get("age_ms"),
+                            "image_kinds": [
+                                kind for kind in KINDS
+                                if kind in episode.streams.get(finger, {})
+                                and event.get(kind + "_offset_bytes") is not None
+                                and event.get(kind + "_length_bytes") is not None
+                                and event.get(kind + "_shape") is not None
+                            ],
+                        }
+                    )
+                sync_frames.append(sync_frame)
 
-        payload = {
-            "rollout_id": rollout_id,
-            "camera": camera,
-            "frame_min": frames[0],
-            "frame_max": frames[-1],
-            "sync_frames": sync_frames,
-            "fingers": finger_series,
-        }
-        self._series_cache[cache_key] = payload
-        return payload
+            payload = {
+                "rollout_id": rollout_id,
+                "camera": camera,
+                "frame_min": frames[0],
+                "frame_max": frames[-1],
+                "sync_frames": sync_frames,
+                "fingers": finger_series,
+            }
+            with self._cache_lock:
+                self._series_cache_misses += 1
+                self._series_cache[cache_key] = payload
+                self._series_cache.move_to_end(cache_key)
+                while len(self._series_cache) > self._series_cache_limit:
+                    self._series_cache.popitem(last=False)
+                    self._series_cache_evictions += 1
+            return payload
 
     def _read_image(
         self,

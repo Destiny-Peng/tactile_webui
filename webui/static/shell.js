@@ -24,7 +24,7 @@ var state = {
   tactilePendingFrame: null,
   results: {
     sources: [], selectedSource: "", selectedId: "", currentFrame: 0,
-    points: [], videoGeneration: 0
+    points: [], videoGeneration: 0, annotationLabels: [], visibleAnnotationLabels: []
   },
   telemetry: [],
   telemetryTimer: null,
@@ -219,7 +219,7 @@ function chooseCamera(record) {
 function timelinePercent(frame, total) {
   return total <= 1 ? 0 : Math.max(0, Math.min(100, Number(frame) * 100 / (total - 1)));
 }
-function renderPrecisionTimeline(containerId, events, totalFrames, currentFrame, activeIndex, onSelect, onSeek) {
+function renderPrecisionTimeline(containerId, events, totalFrames, currentFrame, activeIndex, onSelect, onSeek, labelKeys) {
   var container = byId(containerId);
   if (!container) return;
   var total = Math.max(1, Number(totalFrames) || 1);
@@ -229,7 +229,8 @@ function renderPrecisionTimeline(containerId, events, totalFrames, currentFrame,
     html += '<i class="timeline-gridline" style="left:' + (ratio * 100) + '%"></i>';
     html += '<span class="timeline-axis-label" style="left:' + (ratio * 100) + '%">' + Math.round((total - 1) * ratio) + '</span>';
   });
-  LABEL_KEYS.forEach(function (key) {
+  var lanes = Array.isArray(labelKeys) ? labelKeys : LABEL_KEYS;
+  lanes.forEach(function (key) {
     html += '<div class="timeline-lane" data-label-key="' + key + '"><span class="timeline-lane-label">' + key + '</span>';
     (events || []).forEach(function (event, index) {
       if (Number(event.event_key) !== key) return;
@@ -584,8 +585,59 @@ function setupResultsRollout() {
   var cameras = cameraKeys(record); var camera = byId("resultsCamera");
   camera.innerHTML = cameras.map(function (key) { return '<option value="' + escapeHtml(key) + '">' + escapeHtml(key) + '</option>'; }).join(""); camera.value = chooseCamera(record);
   byId("resultsFrameSlider").max = Math.max(0, Number(record.total_frames || 1) - 1); byId("resultsFrameSlider").value = "0";
-  renderPrecisionTimeline("resultsAnnotationTimeline", record.annotation_events || [], record.total_frames, 0, null, null, seekResultsFrame);
+  setupResultsAnnotationFilters(record);
+  renderResultsAnnotationTimeline();
   loadResultsVideo();
+}
+function resultAnnotationLabels(record) {
+  return Array.from(new Set((record && record.annotation_events || []).map(function (event) {
+    return Number(event.event_key);
+  }).filter(function (key) { return Number.isFinite(key); }))).sort(function (a, b) { return a - b; });
+}
+function setupResultsAnnotationFilters(record) {
+  state.results.annotationLabels = resultAnnotationLabels(record);
+  state.results.visibleAnnotationLabels = state.results.annotationLabels.slice();
+  renderResultsLabelFilters();
+}
+function renderResultsLabelFilters() {
+  var container = byId("resultsLabelFilters");
+  if (!container) return;
+  var labels = state.results.annotationLabels || [];
+  if (!labels.length) {
+    container.innerHTML = '<span class="timeline-help">No labels</span>';
+    return;
+  }
+  var visible = state.results.visibleAnnotationLabels || [];
+  container.innerHTML = '<button type="button" class="label-filter-chip' + (visible.length === labels.length ? ' active' : '') + '" data-label-filter="all">All</button>'
+    + labels.map(function (key) {
+      return '<button type="button" class="label-filter-chip label-' + key + (visible.indexOf(key) >= 0 ? ' active' : '') + '" data-label-filter="' + key + '">' + key + '</button>';
+    }).join("");
+  container.querySelectorAll("[data-label-filter]").forEach(function (button) {
+    button.addEventListener("click", function () {
+      var value = button.dataset.labelFilter;
+      if (value === "all") {
+        state.results.visibleAnnotationLabels = labels.slice();
+      } else {
+        var key = Number(value);
+        var current = state.results.visibleAnnotationLabels.slice();
+        var index = current.indexOf(key);
+        if (index >= 0) current.splice(index, 1); else current.push(key);
+        current.sort(function (a, b) { return a - b; });
+        state.results.visibleAnnotationLabels = current;
+      }
+      renderResultsLabelFilters();
+      renderResultsAnnotationTimeline();
+    });
+  });
+}
+function renderResultsAnnotationTimeline() {
+  var record = resultRollout();
+  if (!record) return;
+  var visible = state.results.visibleAnnotationLabels || [];
+  var events = (record.annotation_events || []).filter(function (event) {
+    return visible.indexOf(Number(event.event_key)) >= 0;
+  });
+  renderPrecisionTimeline("resultsAnnotationTimeline", events, record.total_frames, state.results.currentFrame, null, null, seekResultsFrame, visible);
 }
 function loadResultsVideo() {
   var record = resultRollout(); if (!record) return;

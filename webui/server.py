@@ -690,7 +690,7 @@ class TactileHandler(BaseHTTPRequestHandler):
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "image/png")
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "private, max-age=86400, immutable")
+        self.send_header("Cache-Control", "private, max-age=60")
         if self._finish_headers():
             self._safe_write(body)
 
@@ -834,6 +834,7 @@ class TactileHandler(BaseHTTPRequestHandler):
                         "manifest_exists": self.app.manifest_path.is_file(),
                         "manifest": self.app._display_path(self.app.manifest_path, self.app.source_root),
                         "source_project_root": str(self.app.source_root),
+                        "tactile_cache": self.app.tactile.cache_stats(),
                     }
                 )
                 self.json_response(HTTPStatus.OK, snapshot)

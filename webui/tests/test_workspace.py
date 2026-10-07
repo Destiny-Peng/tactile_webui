@@ -188,6 +188,16 @@ class WorkspaceAnnotationTest(unittest.TestCase):
         self.assertEqual(app.data_root, external.resolve())
         self.assertTrue(app.tactile.has_rollout("usb_symlink_path_only"))
 
+    def test_results_annotation_filter_is_dynamic(self):
+        static = Path(__file__).resolve().parents[1] / "static"
+        html = (static / "index.html").read_text(encoding="utf-8")
+        javascript = (static / "shell.js").read_text(encoding="utf-8")
+        self.assertIn('id="resultsLabelFilters"', html)
+        self.assertIn("resultAnnotationLabels", javascript)
+        self.assertIn("visibleAnnotationLabels", javascript)
+        self.assertIn("renderResultsAnnotationTimeline", javascript)
+        self.assertIn("Array.isArray(labelKeys) ? labelKeys : LABEL_KEYS", javascript)
+
     def test_rejects_invalid_interval(self):
         temporary, app = self.make_app()
         self.addCleanup(temporary.cleanup)

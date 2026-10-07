@@ -1,4 +1,6 @@
 """Verify interval isolation, sequence aggregation, padding and sample-count weights."""
+from .common import project_path
+from .common import binary_target
 import argparse
 import json
 from pathlib import Path
@@ -20,7 +22,7 @@ def verify_real_prefix(out,manifest):
         previous=json.loads(target.read_text())
         assert previous['status']=='PASS' and previous['interval_id']==row['interval_id']
         return
-    source=ROOT/manifest['signature']['source']; original=json.loads((source/'data_manifest.json').read_text())
+    source=project_path(manifest['signature']['source']); original=json.loads((source/'data_manifest.json').read_text())
     events=[e for e in original['source_intervals'] if e['rollout_id']==row['rollout_id']]
     arrays=episode_arrays(original['records'][row['rollout_id']],events,original['signature']['camera'],num_classes=3)
     raw=np.repeat(arrays['f6'][row['first_tick']:row['first_tick']+1],16,axis=0)
@@ -38,13 +40,13 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__); parser.add_argument('--output',type=Path,required=True)
     args=parser.parse_args(); out=args.output.resolve(); torch.set_num_threads(2); torch.manual_seed(7)
     manifest=json.loads((out/'interval_manifest.json').read_text()); assert manifest['status']=='complete'
-    split=json.loads((out/'split_manifest.json').read_text()); signature=manifest['signature']; src=ROOT/signature['source']
+    split=json.loads((out/'split_manifest.json').read_text()); signature=manifest['signature']; src=project_path(signature['source'])
     assert sha(out/'split_manifest.json')==sha(src/'split_manifest.json')==signature['split_sha256']
     ids={name:set(split[name]) for name in ('train','val','test')}
     assert not(ids['train']&ids['val'] or ids['train']&ids['test'] or ids['val']&ids['test'])
     intervals=manifest['records']; assert len({r['interval_id'] for r in intervals})==len(intervals)
     for row in intervals:
-        assert row['rollout_id'] in ids[row['split']] and row['label']==int(row['event_key'] in (6,7))
+        assert row['rollout_id'] in ids[row['split']] and row['label']==binary_target(row)
         with np.load(out/row['feature_path']) as features:
             assert features['f6'].shape==(row['ticks'],1280) and features['deform'].shape==(row['ticks'],2560)
             assert features['label'].ndim==0 and int(features['label'])==row['label']
@@ -90,7 +92,7 @@ def main():
     assert known['balanced_accuracy']==.75
     results['metrics_count_intervals']='PASS'
     for kind,filename in [('f6','f6_tactile_vqvae.pt'),('deform','sharpa_wave_deform_encoder.pth')]:
-        assert sha(ROOT/'checkpoints/T-Rex/encoders'/filename)==signature[kind+'_sha256']
+        assert sha(project_path('checkpoints/T-Rex/encoders', filename))==signature[kind+'_sha256']
     results['pretrained_encoder_weights_unchanged']='PASS'
     if signature['f6_context']=='interval_only':
         verify_real_prefix(out,manifest)

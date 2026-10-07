@@ -1,0 +1,92 @@
+{
+  "schema_version": "tactile_canonical_v1",
+  "rollout_id": "realrobot-failrecovery-20260929_234054_usb_0929_mixedfail_0035-9c0580134b",
+  "ground_truth_outcome": "failure",
+  "outcome_provenance": {
+    "source": "/mnt/hdd/qiuxia/pyr/LF3R/datasets/lf3r_failure_rollouts/v1/failrecovery_manifest.jsonl",
+    "sha256": "ce68fefa99b8507b8f6f9b779e28e4582db46beffefe6a1922d555f6b81c164f",
+    "field": "ground_truth_outcome",
+    "outcome_source": "filename"
+  },
+  "total_frames": 334,
+  "intervals": [
+    {
+      "rollout_id": "realrobot-failrecovery-20260929_234054_usb_0929_mixedfail_0035-9c0580134b",
+      "event_key": 3,
+      "label": "dropped_object",
+      "start_frame": 249,
+      "end_frame": 253,
+      "provenance": [
+        {
+          "source": "/mnt/hdd/qiuxia/pyr/LF3R/annotations/failure_annotations/v1/records/realrobot-failrecovery-20260929_234054_usb_0929_mixedfail_0035-9c0580134b.json",
+          "sha256": "c200ba85b00bb7e9cfd0a84e2b2ab6c8abf3fe2dea2683eb991d2919a4fa2f6f",
+          "source_event_index": 0,
+          "source_failure_type": "dropped_object",
+          "original_event_key": 3,
+          "original_start_frame": 249,
+          "original_end_frame": 253
+        },
+        {
+          "source": "/mnt/hdd/qiuxia/pyr/LF3R/outputs/sharpa_failure_relabel/20261006_165000/original_annotations_backup/realrobot-failrecovery-20260929_234054_usb_0929_mixedfail_0035-9c0580134b.json",
+          "sha256": "c200ba85b00bb7e9cfd0a84e2b2ab6c8abf3fe2dea2683eb991d2919a4fa2f6f",
+          "source_event_index": 0,
+          "source_failure_type": "dropped_object",
+          "original_event_key": 3,
+          "original_start_frame": 249,
+          "original_end_frame": 253
+        },
+        {
+          "source": "/mnt/hdd/qiuxia/pyr/LF3R/outputs/sharpa_failure_relabel/20261006_165000/source_intervals.json",
+          "sha256": "61f8f41a44de504fd5b1f00b0bd7eb58e6a823401e200389d00ee6a02134738e",
+          "source_event_index": 38,
+          "source_failure_type": "dropped_object",
+          "native_source": "/mnt/hdd/qiuxia/pyr/LF3R/outputs/sharpa_failure_relabel/20261006_165000/original_annotations_backup/realrobot-failrecovery-20260929_234054_usb_0929_mixedfail_0035-9c0580134b.json",
+          "original_event_key": 3,
+          "original_start_frame": 249,
+          "original_end_frame": 253
+        },
+        {
+          "source": "/mnt/hdd/qiuxia/pyr/LF3R/outputs/sharpa_failure_relabel/20261006_185200_frame3/original_annotations_backup/realrobot-failrecovery-20260929_234054_usb_0929_mixedfail_0035-9c0580134b.json",
+          "sha256": "c200ba85b00bb7e9cfd0a84e2b2ab6c8abf3fe2dea2683eb991d2919a4fa2f6f",
+          "source_event_index": 0,
+          "source_failure_type": "dropped_object",
+          "original_event_key": 3,
+          "original_start_frame": 249,
+          "original_end_frame": 253
+        },
+        {
+          "source": "/mnt/hdd/qiuxia/pyr/LF3R/outputs/sharpa_failure_relabel/20261006_185200_frame3/source_intervals.json",
+          "sha256": "61f8f41a44de504fd5b1f00b0bd7eb58e6a823401e200389d00ee6a02134738e",
+          "source_event_index": 38,
+          "source_failure_type": "dropped_object",
+          "native_source": "/mnt/hdd/qiuxia/pyr/LF3R/outputs/sharpa_failure_relabel/20261006_185200_frame3/original_annotations_backup/realrobot-failrecovery-20260929_234054_usb_0929_mixedfail_0035-9c0580134b.json",
+          "original_event_key": 3,
+          "original_start_frame": 249,
+          "original_end_frame": 253
+        },
+        {
+          "source": "/mnt/hdd/qiuxia/pyr/LF3R/outputs/sharpa_failure_relabel/20261006_214500_updated/original_annotations_backup/realrobot-failrecovery-20260929_234054_usb_0929_mixedfail_0035-9c0580134b.json",
+          "sha256": "c200ba85b00bb7e9cfd0a84e2b2ab6c8abf3fe2dea2683eb991d2919a4fa2f6f",
+          "source_event_index": 0,
+          "source_failure_type": "dropped_object",
+          "original_event_key": 3,
+          "original_start_frame": 249,
+          "original_end_frame": 253
+        },
+        {
+          "source": "/mnt/hdd/qiuxia/pyr/LF3R/outputs/sharpa_failure_relabel/20261006_214500_updated/source_intervals.json",
+          "sha256": "bd9d18715329ea190cb2e116de32d1958ca4a3f72fd04c7ac6b3e333adb24767",
+          "source_event_index": 38,
+          "source_failure_type": "dropped_object",
+          "native_source": "/mnt/hdd/qiuxia/pyr/LF3R/outputs/sharpa_failure_relabel/20261006_214500_updated/original_annotations_backup/realrobot-failrecovery-20260929_234054_usb_0929_mixedfail_0035-9c0580134b.json",
+          "original_event_key": 3,
+          "original_start_frame": 249,
+          "original_end_frame": 253
+        }
+      ],
+      "event_index": 0,
+      "source_record": "/mnt/hdd/qiuxia/pyr/tactile_webui/annotations/tactile_canonical/v1/records/realrobot-failrecovery-20260929_234054_usb_0929_mixedfail_0035-9c0580134b.json",
+      "stages": []
+    }
+  ]
+}

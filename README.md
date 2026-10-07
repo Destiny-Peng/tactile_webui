@@ -203,3 +203,7 @@ python tools/materialize_tactile_images.py --root .
 ```
 
 The server retains a compatibility fallback to the packed `.u8` streams when a static PNG is missing, but migrated and newly exported episodes use the static path.
+
+## Migrated SHARPA tools
+
+The complete tactile experiment toolchain and launch scripts now live under `tools/`. Run `bash tools/run_sharpa_tactile_ablation.sh --list` to discover modules. See [tool migration and validation](tools/MIGRATION.md) for data/output path resolution, interpreter selection, and preserved original versions.

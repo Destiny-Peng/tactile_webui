@@ -1,4 +1,6 @@
 """Align-only one-sided Gaussian supervision with fixed last-timestep hard GT."""
+from .common import project_path, relative_path
+from .common import canonical_key, is_stage
 import argparse
 import datetime
 import json
@@ -23,24 +25,24 @@ GROUPS=('merged_align','original_align')
 def prepare(args):
     output=args.output;output.mkdir(parents=True,exist_ok=False)
     source=args.source;origin=json.loads((source/'dataset_manifest.json').read_text())
-    dense=ROOT/origin['source'];old=json.loads((dense/'dataset_manifest.json').read_text())
-    upstream=ROOT/old['source'];dm=json.loads((upstream/'data_manifest.json').read_text())
+    dense=project_path(origin['source']);old=json.loads((dense/'dataset_manifest.json').read_text())
+    upstream=project_path(old['source']);dm=json.loads((upstream/'data_manifest.json').read_text())
     encoder=FrozenEncoders().to(args.device)
     assert encoder.vq.cfg.granularity=='finger' and not any(p.requires_grad for p in encoder.parameters())
-    hashes={str(p.relative_to(ROOT)):sha(p) for p in (source/'dataset_manifest.json',dense/'dataset_manifest.json',upstream/'data_manifest.json',encoder.f6_path,encoder.deform_path,Path(__file__),Path(__file__).with_name('gaussian_targets.py'))}
+    hashes={str(relative_path(p)):sha(p) for p in (source/'dataset_manifest.json',dense/'dataset_manifest.json',upstream/'data_manifest.json',encoder.f6_path,encoder.deform_path,Path(__file__),Path(__file__).with_name('gaussian_targets.py'))}
     rows=[];first_prefix=None
     for ri,row in enumerate(origin['rollouts']):
         record=dm['records'][row['rollout_id']]
         for key,hashkey in [('synchronized_frames_path','frames_sha256'),('tactile_events_path','events_sha256')]:
-            p=ROOT/record[key];value=sha(p);assert value==dm['signature']['episode_sources'][row['rollout_id']][hashkey];hashes[record[key]]=value
+            p=project_path(record[key]);value=sha(p);assert value==dm['signature']['episode_sources'][row['rollout_id']][hashkey];hashes[record[key]]=value
         raw=episode_arrays(record,row['events'],dm['signature']['camera'],num_classes=3)
-        path=dense/'features'/(row['rollout_id']+'.npz');hashes[str(path.relative_to(ROOT))]=sha(path);cached=load(path)
-        aligns=sorted([e for e in row['events'] if e['event_key'] in (6,8)],key=lambda e:(e['start_frame'],e['event_index']))
+        path=dense/'features'/(row['rollout_id']+'.npz');hashes[str(relative_path(path))]=sha(path);cached=load(path)
+        aligns=sorted([e for e in row['events'] if is_stage(e, 'align')],key=lambda e:(e['start_frame'],e['event_index']))
         units=[dict(group='merged_align',start=row['merged_align']['start_frame'],key=row['merged_align']['end_frame'],end=row['annotation_end'],outcome=row['merged_align']['outcome'],member_indices=row['merged_align']['member_indices'])]
         for j,e in enumerate(aligns):
             end=aligns[j+1]['start_frame']-1 if j+1<len(aligns) else row['annotation_end']
             assert end>=e['end_frame']
-            units.append(dict(group='original_align',start=e['start_frame'],key=e['end_frame'],end=end,outcome=1 if e['event_key']==8 else 2,member_indices=[e['event_index']]))
+            units.append(dict(group='original_align',start=e['start_frame'],key=e['end_frame'],end=end,outcome=canonical_key(e),member_indices=[e['event_index']]))
         for u in units:
             mask=(cached['video_frames']>=u['start'])&(cached['video_frames']<=u['end']);indices=np.flatnonzero(mask)
             assert len(indices)>0
@@ -73,9 +75,9 @@ def prepare(args):
             counts.append(dict(group=group,split=split,interactions=len(selected),success=sum(r['outcome']==1 for r in selected),failure=sum(r['outcome']==2 for r in selected),class_ticks=np.bincount(y,minlength=3).tolist(),total_ticks=len(y)))
     assert sum(r['group']=='merged_align' for r in rows)==114 and sum(r['group']=='original_align' for r in rows)==163
     shutil.copy2(source/'split_manifest.json',output/'split_manifest.json')
-    assert all(sha(ROOT/p)==v for p,v in hashes.items())
+    assert all(sha(project_path(p))==v for p,v in hashes.items())
     save(output/'prefix_encoding_check.npz',first_prefix)
-    dump(output/'dataset_manifest.json',dict(status='complete',created_at=datetime.datetime.now().astimezone().isoformat(),source=str(source.relative_to(ROOT)),groups=list(GROUPS),records=rows,distribution=counts,input_hashes=hashes,split_sha256=sha(output/'split_manifest.json'),sigmas=list(SIGMAS),sigma_unit='valid synchronized prediction ticks; no downsampling',encoder_window=16,f6_dim=1280,deform_dim=2560,encoder_mode='finger',class_order=list(CLASSES),history='single past16 raw F6 encoding plus current deform; GRU state retained within interaction; MLP current encoding only',key='Align end; no fuzzy band; original 6/8 only; merged final Align outcome',tail='until next Align start minus1; last Align and merged until last annotated end',hard_gt='t<Key:0; t>=Key:final outcome; invariant across sigma',soft_target='g=exp(-max(key_index-position,0)^2/(2*sigma^2)); success=[1-g,g,0]; failure=[1-g,0,g]',loss='unweighted soft-target CE over valid ticks; no augmentation',training_started=False))
+    dump(output/'dataset_manifest.json',dict(status='complete',created_at=datetime.datetime.now().astimezone().isoformat(),source=str(relative_path(source)),groups=list(GROUPS),records=rows,distribution=counts,input_hashes=hashes,split_sha256=sha(output/'split_manifest.json'),sigmas=list(SIGMAS),sigma_unit='valid synchronized prediction ticks; no downsampling',encoder_window=16,f6_dim=1280,deform_dim=2560,encoder_mode='finger',class_order=list(CLASSES),history='single past16 raw F6 encoding plus current deform; GRU state retained within interaction; MLP current encoding only',key='Align end; no fuzzy band; original Align stage only; merged final Align outcome',tail='until next Align start minus1; last Align and merged until last annotated end',hard_gt='t<Key:0; t>=Key:final outcome; invariant across sigma',soft_target='g=exp(-max(key_index-position,0)^2/(2*sigma^2)); success=[1-g,g,0]; failure=[1-g,0,g]',loss='unweighted soft-target CE over valid ticks; no augmentation',training_started=False))
     dump(output/'verification.json',dict(status='PASS',targets_monotonic_and_normalized=True,hard_gt_sigma_invariant=True,no_insert_targets=True,rollout_split_preserved=True,source_sensor_hashes_verified=True,source_features_unchanged=True,causal_f6_prefix=True,pretrained_frozen=True))
     snapshot=output/'code_snapshot';snapshot.mkdir()
     for name in ('gaussian_online.py','gaussian_targets.py'):shutil.copy2(Path(__file__).with_name(name),snapshot/name)
@@ -139,7 +141,7 @@ def train_run(output,group,kind,head,seed,sigma,samples,norm,manifest,device):
     val,_=evaluate(model,samples['val'],sigma,device);test,p=evaluate(model,samples['test'],sigma,device)
     y=np.concatenate([s['labels'] for s in samples['test']]);offsets=np.r_[0,np.cumsum([len(s['labels']) for s in samples['test']])]
     save(directory/'test_predictions.npz',dict(labels=y,probabilities=p,offsets=offsets))
-    result=dict(group=group,input=kind,head=head,seed=seed,sigma=sigma,best_epoch=best_epoch,epochs=len(history),validation=val,test=test,directory=str(directory.relative_to(ROOT)))
+    result=dict(group=group,input=kind,head=head,seed=seed,sigma=sigma,best_epoch=best_epoch,epochs=len(history),validation=val,test=test,directory=str(relative_path(directory)))
     dump(directory/'metrics.json',result);dump(directory/'history.json',history)
     del model,optimizer;torch.cuda.empty_cache()
     print('RUN_COMPLETE',group,kind,head,sigma,seed,'valBA',round(best,4),'testBA',round(test['balanced_accuracy'],4),flush=True)
@@ -149,9 +151,9 @@ def train_run(output,group,kind,head,seed,sigma,samples,norm,manifest,device):
 def train(args):
     output=args.output;output.mkdir(parents=True,exist_ok=False);started=time.monotonic()
     manifest=json.loads((args.source/'dataset_manifest.json').read_text())
-    assert all(sha(ROOT/p)==v for p,v in manifest['input_hashes'].items())
-    hashes={str(p.relative_to(ROOT)):sha(p) for p in [args.source/'dataset_manifest.json',args.source/'split_manifest.json',Path(__file__),Path(__file__).with_name('gaussian_targets.py'),Path(__file__).with_name('merged_online.py')]+[args.source/r['feature_path'] for r in manifest['records']]}
-    dump(output/'protocol.json',dict(source=str(args.source.relative_to(ROOT)),groups=list(GROUPS),sigmas=list(SIGMAS),screen_seed=42,repeat_seeds=[43,44,45,46],selection='per group/input/head: maximize seed42 validation fixed-hard-GT BA; tie smaller sigma; no test-based selection',epochs=30,patience=8,batch_interactions=8,optimizer='AdamW lr=.001 wd=.0001 clip1',loss='unweighted soft-target CE, valid tick mean per batch; no augmentation',input_hashes=hashes))
+    assert all(sha(project_path(p))==v for p,v in manifest['input_hashes'].items())
+    hashes={str(relative_path(p)):sha(p) for p in [args.source/'dataset_manifest.json',args.source/'split_manifest.json',Path(__file__),Path(__file__).with_name('gaussian_targets.py'),Path(__file__).with_name('merged_online.py')]+[args.source/r['feature_path'] for r in manifest['records']]}
+    dump(output/'protocol.json',dict(source=str(relative_path(args.source)),groups=list(GROUPS),sigmas=list(SIGMAS),screen_seed=42,repeat_seeds=[43,44,45,46],selection='per group/input/head: maximize seed42 validation fixed-hard-GT BA; tie smaller sigma; no test-based selection',epochs=30,patience=8,batch_interactions=8,optimizer='AdamW lr=.001 wd=.0001 clip1',loss='unweighted soft-target CE, valid tick mean per batch; no augmentation',input_hashes=hashes))
     results=[];selections=[]
     for group in GROUPS:
         samples=read_samples(args.source,manifest,group);norm=normalization(samples['train'])
@@ -165,8 +167,8 @@ def train(args):
                 dump(output/'sigma_selection.json',selections)
                 for seed in range(43,47):
                     results.append(train_run(output,group,kind,head,seed,winner['sigma'],samples,norm,manifest,args.device));dump(output/'results_partial.json',results)
-    assert len(results)==120 and all(sha(ROOT/p)==v for p,v in hashes.items())
-    dump(output/'results.json',results);dump(output/'training_manifest.json',dict(status='complete',runs=len(results),elapsed_seconds=time.monotonic()-started,source=str(args.source.relative_to(ROOT)),input_hashes=hashes))
+    assert len(results)==120 and all(sha(project_path(p))==v for p,v in hashes.items())
+    dump(output/'results.json',results);dump(output/'training_manifest.json',dict(status='complete',runs=len(results),elapsed_seconds=time.monotonic()-started,source=str(relative_path(args.source)),input_hashes=hashes))
     snapshot=output/'code_snapshot';snapshot.mkdir()
     for name in ('gaussian_online.py','gaussian_targets.py','merged_online.py'):shutil.copy2(Path(__file__).with_name(name),snapshot/name)
     print('TRAIN_COMPLETE',len(results),time.monotonic()-started,flush=True)

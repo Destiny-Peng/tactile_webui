@@ -1,4 +1,5 @@
 """Copy verified Align experiment documents into the existing 10.5 weekly summary."""
+from .common import project_path, relative_path
 import argparse
 import csv
 import datetime
@@ -19,17 +20,17 @@ def publish(output):
     for p in (output/'runs').rglob('metrics.json'):source_files.append(p)
     for p in (output/'runs').rglob('history.json'):source_files.append(p)
     for p in (output/'runs'/best/'seed_42').rglob('test_predictions.csv'):source_files.append(p)
-    weekly=ROOT/'WeeklySummary/10.5';destination=weekly/'align_key_windows';destination.mkdir(exist_ok=True)
+    weekly=project_path('WeeklySummary/10.5');destination=weekly/'align_key_windows';destination.mkdir(exist_ok=True)
     copied=[]
     for source in sorted(source_files):
         target=destination/source.relative_to(output);target.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(source,target)
-        copied.append(dict(source=str(source.relative_to(ROOT)),destination=str(target.relative_to(weekly)),
+        copied.append(dict(source=str(relative_path(source)),destination=str(target.relative_to(weekly)),
                            source_sha256=sha(source),destination_sha256=sha(target),byte_identical=True))
         assert sha(source)==sha(target)
     rows=list(csv.DictReader((output/'summary.csv').open()));chosen=[r for r in rows if r['config']==best]
     order=['f6_mlp','f6_gru','deform_mlp','deform_gru','f6_deform_mlp','f6_deform_gru'];chosen.sort(key=lambda r:order.index(r['group']))
     section=['## 实验 5：Align-only Key 滑窗三分类，MLP / Causal GRU','',
-        '只保留 Align event `6/8`，排除 Insert event `7/9`。将实验 4 的完整 interval 二分类，改为固定长度滑窗的状态三分类。','',
+        '只保留 Align stage（provenance），排除 Insert stage（provenance）。将实验 4 的完整 interval 二分类，改为固定长度滑窗的状态三分类。','',
         '| 项目 | 实际做法 |','|---|---|',
         '| Label → GT | `Key=Align end_frame+δ`。窗口不含 Key → `in_progress=0`；含 Key 且原 event 8 → `success=1`；含 Key 且原 event 6 → `failure=2`。每个窗口一个硬 GT，无 Gaussian/soft label/-1。主要包含规则是 Key 落在实际首末采样帧的闭区间内；另测试 Key 必须被实际采中的规则。 |',
         '| Window / augmentation | 固定 16 个采样点，理想帧索引 `[e-15s,…,e-s,e]`；滑动终点每次前进 1 帧。训练 step=`1/3/5/8/12` 或混合；Key 位移半径 n=`0/2/5/10`。训练遍历所有整数 δ∈[-n,+n]；验证/测试 Key 不移动。 |',
@@ -77,19 +78,19 @@ def publish(output):
     if '[实验 5 原始产物与代码索引]' not in text:
         text=text.replace('- [实验 5：Align Key-window 3-class](align_key_windows/README.md)', '- [实验 5：Align Key-window 3-class](align_key_windows/README.md)\n- [实验 5 原始产物与代码索引](align_key_windows/SOURCE_INDEX.md)')
     main.write_text(text)
-    (destination/'SOURCE_INDEX.md').write_text(f'# 原始产物索引\n\n- [原始实验 README](../../../{output.relative_to(ROOT)}/README.md)\n- [原始运行目录](../../../{output.relative_to(ROOT)}/runs)\n- [滑窗准备代码](../../../tools/sharpa_tactile/align_windows_data.py)\n- [MLP/GRU 训练代码](../../../tools/sharpa_tactile/align_windows.py)\n- [验证代码](../../../tools/sharpa_tactile/verify_align_windows.py)\n\n本目录复制报告、图表、逐配置指标、全部 run 的 metrics/history 和第一名配置 seed42 的六组 test prediction。特征与 checkpoint 保留在原 outputs 下。\n')
+    (destination/'SOURCE_INDEX.md').write_text(f'# 原始产物索引\n\n- [原始实验 README](../../../{relative_path(output)}/README.md)\n- [原始运行目录](../../../{relative_path(output)}/runs)\n- [滑窗准备代码](../../../tools/sharpa_tactile/align_windows_data.py)\n- [MLP/GRU 训练代码](../../../tools/sharpa_tactile/align_windows.py)\n- [验证代码](../../../tools/sharpa_tactile/verify_align_windows.py)\n\n本目录复制报告、图表、逐配置指标、全部 run 的 metrics/history 和第一名配置 seed42 的六组 test prediction。特征与 checkpoint 保留在原 outputs 下。\n')
     dump(destination/'copy_manifest.json',dict(created_at=datetime.datetime.now().astimezone().isoformat(),
-        source=str(output.relative_to(ROOT)),files=copied,copied_file_count=len(copied),
+        source=str(relative_path(output)),files=copied,copied_file_count=len(copied),
         generated_files=['SOURCE_INDEX.md','copy_manifest.json','../10.5.md']))
     commit=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
     trex_commit=subprocess.check_output(['git','-C','repos/T-Rex','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
-    report=ROOT/'environment_reports/SHARPA_ALIGN_WINDOWS_20261004_232000.md'
-    report.write_text(f'# Sharpa Align Key-window experiment\n\nCompleted: {datetime.datetime.now().astimezone().isoformat()}\n\n- Environment: repos/ProcVLM/.venv, Python 3.10, torch 2.10+cu128; no new packages installed.\n- GPU: cuda:1; all probe jobs sequential; pretrained encoder weights frozen and reused cached features.\n- LF3R commit: {commit} (working tree changes captured by experiment_manifest.json code SHA256).\n- T-Rex commit: {trex_commit}.\n- Runs: {experiment["runs"]}; 33 config screens plus 3 validation-selected five-seed comparisons.\n- [Original report](../{output.relative_to(ROOT)}/README.md)\n- [Verification](../{output.relative_to(ROOT)}/verification.json)\n- [Training log](../logs/sharpa_align_train_verified_keycycle_20261004_232000.log)\n- [Weekly summary](../WeeklySummary/10.5/10.5.md)\n\nCommands are preserved in the original README. Original annotation files, features and encoders unchanged; split hash audited.\n')
+    report=project_path('environment_reports/SHARPA_ALIGN_WINDOWS_20261004_232000.md')
+    report.write_text(f'# Sharpa Align Key-window experiment\n\nCompleted: {datetime.datetime.now().astimezone().isoformat()}\n\n- Environment: repos/ProcVLM/.venv, Python 3.10, torch 2.10+cu128; no new packages installed.\n- GPU: cuda:1; all probe jobs sequential; pretrained encoder weights frozen and reused cached features.\n- LF3R commit: {commit} (working tree changes captured by experiment_manifest.json code SHA256).\n- T-Rex commit: {trex_commit}.\n- Runs: {experiment["runs"]}; 33 config screens plus 3 validation-selected five-seed comparisons.\n- [Original report](../{relative_path(output)}/README.md)\n- [Verification](../{relative_path(output)}/verification.json)\n- [Training log](../logs/sharpa_align_train_verified_keycycle_20261004_232000.log)\n- [Weekly summary](../WeeklySummary/10.5/10.5.md)\n\nCommands are preserved in the original README. Original annotation files, features and encoders unchanged; split hash audited.\n')
     marker='Sharpa Align Key-window 3-class (20261004_232000)'
     for filename in ('SETUP_STATUS.md','SYSTEM_INFO.txt'):
-        path=ROOT/filename;content=path.read_text()
+        path=project_path(filename);content=path.read_text()
         if marker not in content:
-            with path.open('a') as file:file.write(f'\n\n{marker}: COMPLETE, {experiment["runs"]} sequential frozen-feature MLP/GRU probes; 33 configs, top3 5 seeds; verification PASS; report {report.relative_to(ROOT)}; outputs {output.relative_to(ROOT)}.\n')
+            with path.open('a') as file:file.write(f'\n\n{marker}: COMPLETE, {experiment["runs"]} sequential frozen-feature MLP/GRU probes; 33 configs, top3 5 seeds; verification PASS; report {relative_path(report)}; outputs {relative_path(output)}.\n')
     print('ALIGN_PUBLISH_COMPLETE',len(copied),'files',flush=True)
 
 

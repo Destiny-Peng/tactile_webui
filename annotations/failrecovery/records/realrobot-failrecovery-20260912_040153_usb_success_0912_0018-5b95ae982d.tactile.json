@@ -1,0 +1,210 @@
+{
+  "schema_version": "tactile_intervals_v1",
+  "rollout_id": "realrobot-failrecovery-20260912_040153_usb_success_0912_0018-5b95ae982d",
+  "ground_truth_outcome": "success",
+  "outcome_provenance": {
+    "source": "/mnt/hdd/qiuxia/pyr/LF3R/datasets/lf3r_failure_rollouts/v1/failrecovery_manifest.jsonl",
+    "sha256": "ce68fefa99b8507b8f6f9b779e28e4582db46beffefe6a1922d555f6b81c164f",
+    "field": "ground_truth_outcome",
+    "outcome_source": "filename"
+  },
+  "total_frames": 654,
+  "intervals": [
+    {
+      "rollout_id": "realrobot-failrecovery-20260912_040153_usb_success_0912_0018-5b95ae982d",
+      "event_key": 2,
+      "label": "failure",
+      "start_frame": 391,
+      "end_frame": 439,
+      "provenance": [
+        {
+          "source": "/mnt/hdd/qiuxia/pyr/LF3R/outputs/usb_event_intervals/20261003_202352/original_annotations_backup_20261003_203655/records/realrobot-failrecovery-20260912_040153_usb_success_0912_0018-5b95ae982d.json",
+          "sha256": "1faa4f68ed1af5f06174a42b2e9ba316227c906e0f4c42b298a0fb937fae520e",
+          "source_event_index": 0,
+          "source_failure_type": "timeout_no_progress",
+          "original_event_key": 6,
+          "original_start_frame": 391,
+          "original_end_frame": 439
+        },
+        {
+          "source": "/mnt/hdd/qiuxia/pyr/LF3R/annotations/failure_annotations/v1/records/realrobot-failrecovery-20260912_040153_usb_success_0912_0018-5b95ae982d.json",
+          "sha256": "1faa4f68ed1af5f06174a42b2e9ba316227c906e0f4c42b298a0fb937fae520e",
+          "source_event_index": 0,
+          "source_failure_type": "timeout_no_progress",
+          "original_event_key": 6,
+          "original_start_frame": 391,
+          "original_end_frame": 439
+        }
+      ],
+      "event_index": 0,
+      "source_record": "/mnt/hdd/qiuxia/pyr/tactile_webui/annotations/tactile_canonical/v1/records/realrobot-failrecovery-20260912_040153_usb_success_0912_0018-5b95ae982d.json",
+      "stages": [
+        "align"
+      ]
+    },
+    {
+      "rollout_id": "realrobot-failrecovery-20260912_040153_usb_success_0912_0018-5b95ae982d",
+      "event_key": 1,
+      "label": "success",
+      "start_frame": 453,
+      "end_frame": 477,
+      "provenance": [
+        {
+          "source": "/mnt/hdd/qiuxia/pyr/LF3R/outputs/usb_event_intervals/20261003_202352/original_annotations_backup_20261003_203655/records/realrobot-failrecovery-20260912_040153_usb_success_0912_0018-5b95ae982d.json",
+          "sha256": "1faa4f68ed1af5f06174a42b2e9ba316227c906e0f4c42b298a0fb937fae520e",
+          "source_event_index": 1,
+          "source_failure_type": "observation_error",
+          "original_event_key": 8,
+          "original_start_frame": 453,
+          "original_end_frame": 477
+        },
+        {
+          "source": "/mnt/hdd/qiuxia/pyr/LF3R/annotations/failure_annotations/v1/records/realrobot-failrecovery-20260912_040153_usb_success_0912_0018-5b95ae982d.json",
+          "sha256": "1faa4f68ed1af5f06174a42b2e9ba316227c906e0f4c42b298a0fb937fae520e",
+          "source_event_index": 1,
+          "source_failure_type": "observation_error",
+          "original_event_key": 8,
+          "original_start_frame": 453,
+          "original_end_frame": 477
+        }
+      ],
+      "event_index": 1,
+      "source_record": "/mnt/hdd/qiuxia/pyr/tactile_webui/annotations/tactile_canonical/v1/records/realrobot-failrecovery-20260912_040153_usb_success_0912_0018-5b95ae982d.json",
+      "stages": [
+        "align"
+      ]
+    },
+    {
+      "rollout_id": "realrobot-failrecovery-20260912_040153_usb_success_0912_0018-5b95ae982d",
+      "event_key": 1,
+      "label": "success",
+      "start_frame": 484,
+      "end_frame": 542,
+      "provenance": [
+        {
+          "source": "/mnt/hdd/qiuxia/pyr/LF3R/outputs/usb_event_intervals/20261003_202352/original_annotations_backup_20261003_203655/records/realrobot-failrecovery-20260912_040153_usb_success_0912_0018-5b95ae982d.json",
+          "sha256": "1faa4f68ed1af5f06174a42b2e9ba316227c906e0f4c42b298a0fb937fae520e",
+          "source_event_index": 2,
+          "source_failure_type": "other",
+          "original_event_key": 9,
+          "original_start_frame": 484,
+          "original_end_frame": 542
+        },
+        {
+          "source": "/mnt/hdd/qiuxia/pyr/LF3R/annotations/failure_annotations/v1/records/realrobot-failrecovery-20260912_040153_usb_success_0912_0018-5b95ae982d.json",
+          "sha256": "1faa4f68ed1af5f06174a42b2e9ba316227c906e0f4c42b298a0fb937fae520e",
+          "source_event_index": 2,
+          "source_failure_type": "other",
+          "original_event_key": 9,
+          "original_start_frame": 484,
+          "original_end_frame": 542
+        }
+      ],
+      "event_index": 2,
+      "source_record": "/mnt/hdd/qiuxia/pyr/tactile_webui/annotations/tactile_canonical/v1/records/realrobot-failrecovery-20260912_040153_usb_success_0912_0018-5b95ae982d.json",
+      "stages": [
+        "insert"
+      ]
+    }
+  ],
+  "tactile_intervals": [
+    {
+      "rollout_id": "realrobot-failrecovery-20260912_040153_usb_success_0912_0018-5b95ae982d",
+      "event_key": 2,
+      "label": "failure",
+      "start_frame": 391,
+      "end_frame": 439,
+      "provenance": [
+        {
+          "source": "/mnt/hdd/qiuxia/pyr/LF3R/outputs/usb_event_intervals/20261003_202352/original_annotations_backup_20261003_203655/records/realrobot-failrecovery-20260912_040153_usb_success_0912_0018-5b95ae982d.json",
+          "sha256": "1faa4f68ed1af5f06174a42b2e9ba316227c906e0f4c42b298a0fb937fae520e",
+          "source_event_index": 0,
+          "source_failure_type": "timeout_no_progress",
+          "original_event_key": 6,
+          "original_start_frame": 391,
+          "original_end_frame": 439
+        },
+        {
+          "source": "/mnt/hdd/qiuxia/pyr/LF3R/annotations/failure_annotations/v1/records/realrobot-failrecovery-20260912_040153_usb_success_0912_0018-5b95ae982d.json",
+          "sha256": "1faa4f68ed1af5f06174a42b2e9ba316227c906e0f4c42b298a0fb937fae520e",
+          "source_event_index": 0,
+          "source_failure_type": "timeout_no_progress",
+          "original_event_key": 6,
+          "original_start_frame": 391,
+          "original_end_frame": 439
+        }
+      ],
+      "event_index": 0,
+      "source_record": "/mnt/hdd/qiuxia/pyr/tactile_webui/annotations/tactile_canonical/v1/records/realrobot-failrecovery-20260912_040153_usb_success_0912_0018-5b95ae982d.json",
+      "stages": [
+        "align"
+      ]
+    },
+    {
+      "rollout_id": "realrobot-failrecovery-20260912_040153_usb_success_0912_0018-5b95ae982d",
+      "event_key": 1,
+      "label": "success",
+      "start_frame": 453,
+      "end_frame": 477,
+      "provenance": [
+        {
+          "source": "/mnt/hdd/qiuxia/pyr/LF3R/outputs/usb_event_intervals/20261003_202352/original_annotations_backup_20261003_203655/records/realrobot-failrecovery-20260912_040153_usb_success_0912_0018-5b95ae982d.json",
+          "sha256": "1faa4f68ed1af5f06174a42b2e9ba316227c906e0f4c42b298a0fb937fae520e",
+          "source_event_index": 1,
+          "source_failure_type": "observation_error",
+          "original_event_key": 8,
+          "original_start_frame": 453,
+          "original_end_frame": 477
+        },
+        {
+          "source": "/mnt/hdd/qiuxia/pyr/LF3R/annotations/failure_annotations/v1/records/realrobot-failrecovery-20260912_040153_usb_success_0912_0018-5b95ae982d.json",
+          "sha256": "1faa4f68ed1af5f06174a42b2e9ba316227c906e0f4c42b298a0fb937fae520e",
+          "source_event_index": 1,
+          "source_failure_type": "observation_error",
+          "original_event_key": 8,
+          "original_start_frame": 453,
+          "original_end_frame": 477
+        }
+      ],
+      "event_index": 1,
+      "source_record": "/mnt/hdd/qiuxia/pyr/tactile_webui/annotations/tactile_canonical/v1/records/realrobot-failrecovery-20260912_040153_usb_success_0912_0018-5b95ae982d.json",
+      "stages": [
+        "align"
+      ]
+    },
+    {
+      "rollout_id": "realrobot-failrecovery-20260912_040153_usb_success_0912_0018-5b95ae982d",
+      "event_key": 1,
+      "label": "success",
+      "start_frame": 484,
+      "end_frame": 542,
+      "provenance": [
+        {
+          "source": "/mnt/hdd/qiuxia/pyr/LF3R/outputs/usb_event_intervals/20261003_202352/original_annotations_backup_20261003_203655/records/realrobot-failrecovery-20260912_040153_usb_success_0912_0018-5b95ae982d.json",
+          "sha256": "1faa4f68ed1af5f06174a42b2e9ba316227c906e0f4c42b298a0fb937fae520e",
+          "source_event_index": 2,
+          "source_failure_type": "other",
+          "original_event_key": 9,
+          "original_start_frame": 484,
+          "original_end_frame": 542
+        },
+        {
+          "source": "/mnt/hdd/qiuxia/pyr/LF3R/annotations/failure_annotations/v1/records/realrobot-failrecovery-20260912_040153_usb_success_0912_0018-5b95ae982d.json",
+          "sha256": "1faa4f68ed1af5f06174a42b2e9ba316227c906e0f4c42b298a0fb937fae520e",
+          "source_event_index": 2,
+          "source_failure_type": "other",
+          "original_event_key": 9,
+          "original_start_frame": 484,
+          "original_end_frame": 542
+        }
+      ],
+      "event_index": 2,
+      "source_record": "/mnt/hdd/qiuxia/pyr/tactile_webui/annotations/tactile_canonical/v1/records/realrobot-failrecovery-20260912_040153_usb_success_0912_0018-5b95ae982d.json",
+      "stages": [
+        "insert"
+      ]
+    }
+  ],
+  "review_status": "complete",
+  "migration_source": "/mnt/hdd/qiuxia/pyr/tactile_webui/annotations/tactile_canonical/v1/records/realrobot-failrecovery-20260912_040153_usb_success_0912_0018-5b95ae982d.json"
+}

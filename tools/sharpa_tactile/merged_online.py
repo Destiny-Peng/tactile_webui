@@ -1,4 +1,6 @@
 """One merged Align per rollout; one F6 encoding and last-frame deform per window."""
+from .common import project_path, relative_path
+from .common import canonical_key, is_stage
 import argparse
 import csv
 import datetime
@@ -49,20 +51,20 @@ def label(row,group,n,frames):
 def prepare(args):
     output=args.output; output.mkdir(parents=True,exist_ok=False)
     old=json.loads((args.source/'dataset_manifest.json').read_text())
-    original=ROOT/old['source']; dm=json.loads((original/'data_manifest.json').read_text())
-    source_manifest={json.loads(line)['id']:json.loads(line) for line in (ROOT/dm['manifest']).read_text().splitlines() if line.strip()}
+    original=project_path(old['source']); dm=json.loads((original/'data_manifest.json').read_text())
+    source_manifest={json.loads(line)['id']:json.loads(line) for line in (project_path(dm['manifest'])).read_text().splitlines() if line.strip()}
     encoder=FrozenEncoders().to(args.device)
     assert encoder.vq.cfg.granularity=='finger' and not any(p.requires_grad for p in encoder.parameters())
-    hashes={str((args.source/'dataset_manifest.json').relative_to(ROOT)):sha(args.source/'dataset_manifest.json')}
-    for path in (encoder.f6_path,encoder.deform_path,ROOT/dm['manifest'],Path(__file__)):
-        hashes[str(path.relative_to(ROOT))]=sha(path)
+    hashes={str(relative_path(args.source/'dataset_manifest.json')):sha(args.source/'dataset_manifest.json')}
+    for path in (encoder.f6_path,encoder.deform_path,project_path(dm['manifest']),Path(__file__)):
+        hashes[str(relative_path(path))]=sha(path)
     rows=[]; paths=[]; f6_banks=[]; deform_banks=[]; meta_parts=[]; offset=0
     for ri,original_row in enumerate(old['rollouts']):
         row={k:original_row[k] for k in ('rollout_id','split','annotation_start','annotation_end','total_frames','events')}
-        aligns=sorted([e for e in row['events'] if e['event_key'] in (6,8)],key=lambda e:(e['end_frame'],e['event_index']))
+        aligns=sorted([e for e in row['events'] if is_stage(e, 'align')],key=lambda e:(e['end_frame'],e['event_index']))
         outcome=1 if source_manifest[row['rollout_id']]['ground_truth_outcome']=='success' else 2
-        assert (aligns[-1]['event_key']==8)==(outcome==1)
-        last=aligns[-1]; following=[e for e in row['events'] if e['event_key'] in (7,9) and e['event_index']>last['event_index']]
+        assert (canonical_key(aligns[-1])==1)==(outcome==1)
+        last=aligns[-1]; following=[e for e in row['events'] if is_stage(e, 'insert') and e['event_index']>last['event_index']]
         insert=min(following,key=lambda e:e['event_index']) if following else None
         row['merged_align']=dict(start_frame=min(e['start_frame'] for e in aligns),end_frame=max(e['end_frame'] for e in aligns),outcome=outcome,member_indices=[e['event_index'] for e in aligns],insert_start=insert['start_frame'] if insert else None)
         covered=set()
@@ -70,9 +72,9 @@ def prepare(args):
         row['merged_gap_frames']=row['merged_align']['end_frame']-row['merged_align']['start_frame']+1-len(covered)
         record=dm['records'][row['rollout_id']]
         for k in ('synchronized_frames_path','tactile_events_path'):
-            hashes[record[k]]=sha(ROOT/record[k])
+            hashes[record[k]]=sha(project_path(record[k]))
         raw=episode_arrays(record,row['events'],dm['signature']['camera'],num_classes=3)
-        source_path=args.source/original_row['feature_path'];hashes[str(source_path.relative_to(ROOT))]=sha(source_path)
+        source_path=args.source/original_row['feature_path'];hashes[str(relative_path(source_path))]=sha(source_path)
         cached=load(source_path)
         segment=np.cumsum(np.r_[False,np.diff(cached['ticks'])!=1])
         unique={}; ticks=[]; frames=[]; last_index=[]; sid=[]; step_values=[]; padded=[]
@@ -134,9 +136,9 @@ def prepare(args):
             distribution.append(dict(group=group,split=split,counts=counts,total=len(records)))
         assert counts[2]>0
     assert sum(r['merged_align']['outcome']==1 for r in rows)==92 and sum(r['merged_align']['outcome']==2 for r in rows)==22
-    assert all(sha(ROOT/path)==value for path,value in hashes.items())
+    assert all(sha(project_path(path))==value for path,value in hashes.items())
     split_path=args.source/'split_manifest.json';shutil.copy2(split_path,output/'split_manifest.json')
-    dump(output/'dataset_manifest.json',dict(status='complete',created_at=datetime.datetime.now().astimezone().isoformat(),source=str(args.source.relative_to(ROOT)),rollouts=rows,groups=list(GROUPS),class_mapping=list(CLASSES),window=16,posterior_indices=list(range(8,16)),reference_n=5,reference_step=3,ns=[0,2,5,10],steps=[1,3,5,8,12],split_sha256=sha(split_path),input_hashes=hashes,distribution=distribution,encoder_mode='finger',f6_dim=1280,deform_dim=2560,input='one F6 encoding of exact 16 sampled raw points; deform at last point only',training_started=False))
+    dump(output/'dataset_manifest.json',dict(status='complete',created_at=datetime.datetime.now().astimezone().isoformat(),source=str(relative_path(args.source)),rollouts=rows,groups=list(GROUPS),class_mapping=list(CLASSES),window=16,posterior_indices=list(range(8,16)),reference_n=5,reference_step=3,ns=[0,2,5,10],steps=[1,3,5,8,12],split_sha256=sha(split_path),input_hashes=hashes,distribution=distribution,encoder_mode='finger',f6_dim=1280,deform_dim=2560,input='one F6 encoding of exact 16 sampled raw points; deform at last point only',training_started=False))
     dump(output/'verification.json',dict(status='PASS',one_merged_align_per_rollout=True,rollout_outcomes={'success':92,'failure':22},fixed_rollout_split=True,labels_checked=True,source_hashes_unchanged=True,encoder_frozen=True))
     snapshot=output/'code_snapshot';snapshot.mkdir();shutil.copy2(Path(__file__),snapshot/Path(__file__).name)
     print('DATA_COMPLETE',json.dumps(distribution),flush=True)
@@ -211,13 +213,13 @@ def train(args):
     output=args.output;output.mkdir(parents=True,exist_ok=False)
     manifest=json.loads((args.source/'dataset_manifest.json').read_text());rows=manifest['rollouts']
     paths=json.loads((args.source/'paths.json').read_text());banks=load(args.source/'features.npz')
-    hashes={str(p.relative_to(ROOT)):sha(p) for p in (args.source/'dataset_manifest.json',args.source/'features.npz',args.source/'windows.npz',args.source/'paths.json',Path(__file__))}
-    assert all(sha(ROOT/p)==v for p,v in manifest['input_hashes'].items())
+    hashes={str(relative_path(p)):sha(p) for p in (args.source/'dataset_manifest.json',args.source/'features.npz',args.source/'windows.npz',args.source/'paths.json',Path(__file__))}
+    assert all(sha(project_path(p))==v for p,v in manifest['input_hashes'].items())
     tables={k:torch.from_numpy(v).to(args.device) for k,v in banks.items()};results=[];start_time=time.monotonic()
     for group in GROUPS:
         data={split:load(args.source/'ready'/group/(split+'.npz')) for split in ('train','val','test')}
         for split in data:
-            p=args.source/'ready'/group/(split+'.npz');hashes[str(p.relative_to(ROOT))]=sha(p)
+            p=args.source/'ready'/group/(split+'.npz');hashes[str(relative_path(p))]=sha(p)
         seq={split:sequences(paths,data[split],rows,split) for split in data}
         counts=np.bincount(data['train']['labels'],minlength=3);weights=1/counts;weights/=weights.mean()
         assert counts[0]==counts[1]==counts[2]
@@ -266,9 +268,9 @@ def train(args):
                     results.append(result);dump(output/'results.json',results)
                     print('TRAIN',len(results),60,group,seed,kind,head,'BA',test['balanced_accuracy'],'F1',test['macro_f1'],'epoch',best_epoch,'elapsed',round(time.monotonic()-start_time),flush=True)
                     del model,optimizer
-    assert all(sha(ROOT/p)==v for p,v in hashes.items())
+    assert all(sha(project_path(p))==v for p,v in hashes.items())
     snapshot=output/'code_snapshot';snapshot.mkdir();shutil.copy2(Path(__file__),snapshot/Path(__file__).name)
-    dump(output/'run_manifest.json',dict(status='complete',dataset=str(args.source.relative_to(ROOT)),device=args.device,seeds=list(range(42,47)),groups=list(GROUPS),input_hashes=hashes,split_sha256=manifest['split_sha256'],elapsed_seconds=time.monotonic()-start_time,git_commit=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),environment='repos/ProcVLM/.venv',torch_version=str(torch.__version__),optimizer='AdamW lr=.001 wd=.0001 clip=1',epochs=30,patience=8,mlp_batch_size=128,gru_sequence_batch_size=8,gru_training='full chronological segment; unselected context has no loss; state reset only rollout/tactile gap; no TBPTT',selection='maximum validation BA first tie',encoder_frozen=True))
+    dump(output/'run_manifest.json',dict(status='complete',dataset=str(relative_path(args.source)),device=args.device,seeds=list(range(42,47)),groups=list(GROUPS),input_hashes=hashes,split_sha256=manifest['split_sha256'],elapsed_seconds=time.monotonic()-start_time,git_commit=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),environment='repos/ProcVLM/.venv',torch_version=str(torch.__version__),optimizer='AdamW lr=.001 wd=.0001 clip=1',epochs=30,patience=8,mlp_batch_size=128,gru_sequence_batch_size=8,gru_training='full chronological segment; unselected context has no loss; state reset only rollout/tactile gap; no TBPTT',selection='maximum validation BA first tie',encoder_frozen=True))
 
 
 def main():

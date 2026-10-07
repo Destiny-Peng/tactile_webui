@@ -34,7 +34,7 @@ except ImportError:  # direct ``python webui/server.py`` execution
     from tactile_service import FailRecoveryTactileService
 
 
-LABEL_KEYS = (6, 7, 8, 9)
+LABEL_KEYS = (1, 2, 3, 4)
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     "source_project_root": ".",
@@ -327,6 +327,9 @@ class TactileApplication:
         return self.annotation_target_path() / f"{rollout_id}.tactile.json"
 
     def annotation_seed_path(self) -> Path | None:
+        canonical = self.root / "annotations/tactile_canonical/v1/intervals.jsonl"
+        if canonical.is_file():
+            return canonical
         pattern = str(self._settings["annotation_seed_glob"])
         candidates = sorted(
             (path for path in self.data_root.glob(pattern) if path.is_file()),
@@ -412,6 +415,8 @@ class TactileApplication:
                 raise ValueError(f"event {index + 1} has invalid key/start/end") from exc
             if key not in LABEL_KEYS:
                 raise ValueError(f"event {index + 1} has unsupported event_key {key}")
+            if key in (3, 4) and record.get("ground_truth_outcome") != "failure":
+                raise ValueError("labels 3/4 require authoritative failure outcome")
             if start < 0 or end < start:
                 raise ValueError(f"event {index + 1} requires 0 <= start <= end")
             if total_frames and end >= total_frames:
@@ -419,6 +424,7 @@ class TactileApplication:
             event_index = index
             normalized.append(
                 {
+                    **raw,
                     "event_id": f"{rollout_id}:event:{event_index}",
                     "rollout_id": rollout_id,
                     "event_index": event_index,
@@ -448,6 +454,7 @@ class TactileApplication:
                     previous = {}
             now = datetime.now().astimezone().isoformat()
             record = {
+                **previous,
                 "schema_version": "tactile_intervals_v1",
                 "rollout_id": rollout_id,
                 "review_status": "complete" if normalized else "unreviewed",

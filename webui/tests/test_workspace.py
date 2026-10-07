@@ -20,6 +20,7 @@ class WorkspaceAnnotationTest(unittest.TestCase):
                     "id": "usb_001",
                     "task_key": "usb_insert",
                     "task_description": "Insert USB",
+                    "ground_truth_outcome": "failure",
                     "total_frames": 100,
                     "fps": 30,
                     "camera_video_paths": {"cam_high": "datasets/video.mp4"},
@@ -35,19 +36,31 @@ class WorkspaceAnnotationTest(unittest.TestCase):
         temporary, app = self.make_app()
         self.addCleanup(temporary.cleanup)
         events = [
-            {"event_key": 6, "start_frame": 10, "end_frame": 20},
-            {"event_key": 7, "start_frame": 30, "end_frame": 40},
-            {"event_key": 8, "start_frame": 50, "end_frame": 60},
-            {"event_key": 9, "start_frame": 70, "end_frame": 80},
+            {"event_key": 1, "start_frame": 10, "end_frame": 20},
+            {"event_key": 2, "start_frame": 30, "end_frame": 40},
+            {"event_key": 3, "start_frame": 50, "end_frame": 60},
+            {"event_key": 4, "start_frame": 70, "end_frame": 80},
         ]
         saved = app.save_rollout_annotations("usb_001", events)
-        self.assertEqual([row["event_key"] for row in saved], [6, 7, 8, 9])
+        self.assertEqual([row["event_key"] for row in saved], [1, 2, 3, 4])
         self.assertTrue(all("event_name" not in row for row in saved))
         self.assertEqual(len(app.annotations_by_rollout()["usb_001"]), 4)
         self.assertEqual(app.annotation_target_path(), app.root / "annotations/failrecovery/records")
         self.assertTrue(app.annotation_record_path("usb_001").is_file())
         record = json.loads(app.annotation_record_path("usb_001").read_text())
-        self.assertEqual([row["event_key"] for row in record["tactile_intervals"]], [6, 7, 8, 9])
+        self.assertEqual([row["event_key"] for row in record["tactile_intervals"]], [1, 2, 3, 4])
+
+    def test_independent_labels_require_failure_and_keep_provenance(self):
+        temporary, app = self.make_app()
+        self.addCleanup(temporary.cleanup)
+        events = [{"event_key": key, "start_frame": 10, "end_frame": 20,
+                   "provenance": [{"source": "canonical source"}]} for key in (2, 3, 4)]
+        saved = app.save_rollout_annotations("usb_001", events)
+        self.assertEqual(len(saved), 3)
+        self.assertTrue(all(event["provenance"] for event in saved))
+        app.rollout_map()["usb_001"]["ground_truth_outcome"] = "success"
+        with self.assertRaises(ValueError):
+            app.save_rollout_annotations("usb_001", events)
 
     def test_existing_lf3r_record_is_not_overwritten(self):
         temporary, app = self.make_app()
@@ -56,7 +69,7 @@ class WorkspaceAnnotationTest(unittest.TestCase):
         records.mkdir(parents=True)
         legacy = records / "usb_001.json"
         legacy.write_text(json.dumps({"schema_version": 2, "rollout_id": "usb_001", "notes": "keep me"}))
-        app.save_rollout_annotations("usb_001", [{"event_key": 8, "start_frame": 10, "end_frame": 20}])
+        app.save_rollout_annotations("usb_001", [{"event_key": 3, "start_frame": 10, "end_frame": 20}])
         self.assertEqual(json.loads(legacy.read_text())["notes"], "keep me")
         self.assertTrue((records / "usb_001.tactile.json").is_file())
 
@@ -116,7 +129,7 @@ class WorkspaceAnnotationTest(unittest.TestCase):
             json.dumps(
                 {
                     "rollout_id": "usb_symlink",
-                    "event_key": 6,
+                    "event_key": 1,
                     "start_frame": 0,
                     "end_frame": 0,
                 }
@@ -180,7 +193,7 @@ class WorkspaceAnnotationTest(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         with self.assertRaises(ValueError):
             app.save_rollout_annotations(
-                "usb_001", [{"event_key": 6, "start_frame": 80, "end_frame": 120}]
+                "usb_001", [{"event_key": 1, "start_frame": 80, "end_frame": 120}]
             )
 
     def test_historical_seed_is_copied_not_modified(self):
@@ -192,18 +205,18 @@ class WorkspaceAnnotationTest(unittest.TestCase):
             "event_id": "usb_001:event:0",
             "rollout_id": "usb_001",
             "event_index": 0,
-            "event_key": 6,
+            "event_key": 1,
             "start_frame": 5,
             "end_frame": 9,
         }
         seed.write_text(json.dumps(original) + "\n")
         before = seed.read_text()
         app.save_rollout_annotations(
-            "usb_001", [{"event_key": 8, "start_frame": 15, "end_frame": 19}]
+            "usb_001", [{"event_key": 3, "start_frame": 15, "end_frame": 19}]
         )
         self.assertEqual(seed.read_text(), before)
         loaded = app.annotations_by_rollout()["usb_001"]
-        self.assertEqual([row["event_key"] for row in loaded], [8])
+        self.assertEqual([row["event_key"] for row in loaded], [3])
 
 
 if __name__ == "__main__":

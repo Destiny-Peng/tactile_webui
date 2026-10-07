@@ -23,3 +23,6 @@ artifacts/
 
 # Runtime diagnostics / logs
 logs/
+
+# Original tool versions retained during mv migration
+.migration_archive/

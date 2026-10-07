@@ -1,4 +1,5 @@
 """Audit binary merged-interval probes and publish both equivalent group aliases."""
+from .common import project_path, relative_path
 import argparse
 import csv
 import json
@@ -18,10 +19,10 @@ def write_csv(path,records):
 
 def main():
     p=argparse.ArgumentParser();p.add_argument('--output',type=Path,required=True);a=p.parse_args();output=a.output.resolve()
-    run=json.loads((output/'run_manifest.json').read_text());dataset=ROOT/run['dataset'];dm=json.loads((dataset/'interval_manifest.json').read_text())
+    run=json.loads((output/'run_manifest.json').read_text());dataset=project_path(run['dataset']);dm=json.loads((dataset/'interval_manifest.json').read_text())
     results=json.loads((output/'results.json').read_text());assert len(results)==30
-    assert all(sha(ROOT/path)==value for path,value in run['input_hashes'].items())
-    assert all(sha(ROOT/path)==value for path,value in dm['input_hashes'].items())
+    assert all(sha(project_path(path))==value for path,value in run['input_hashes'].items())
+    assert all(sha(project_path(path))==value for path,value in dm['input_hashes'].items())
     equivalent=json.loads((dataset/'group_equivalence.json').read_text());assert equivalent['identical'] and len(set(equivalent['interval_corpus_sha256'].values()))==1
     split=json.loads((dataset/'split_manifest.json').read_text());assert sha(dataset/'split_manifest.json')==dm['split_sha256']
     assert not(set(split['train'])&set(split['val']) or set(split['train'])&set(split['test']) or set(split['val'])&set(split['test']))
@@ -92,11 +93,11 @@ def main():
     fig.suptitle('Seed 42 | top: counts; bottom: GT-row normalized');fig.tight_layout();fig.savefig(output/'confusion_seed42.png',dpi=160);plt.close(fig)
     dump(output/'verification.json',dict(status='PASS',unique_runs=30,source_groups_equivalent=True,source_hashes_unchanged=True,interval_boundaries_checked=True,rollout_split_isolation=True,metrics_recomputed=True,checkpoint_cpu_replays=replays,training_normalization_checked_all_checkpoints=True,weights_by_interval_count=True,selection_checked=True,normalized_confusions_checked=True))
     lines=['# 合并 Align interval 的 binary 可分性实验','',
-    f'数据：`{dataset.relative_to(ROOT)}`；训练：`{output.relative_to(ROOT)}`。F6 / Deform / Fusion × MLP temporal pooling / 单向 GRU × seeds42–46，共30次独立训练。','',
+    f'数据：`{relative_path(dataset)}`；训练：`{relative_path(output)}`。F6 / Deform / Fusion × MLP temporal pooling / 单向 GRU × seeds42–46，共30次独立训练。','',
     '## 为什么两组是同一个实验','',
     '当前 symmetric_merged 和 asymmetric_merged 共享完全相同的合并 Align interval，仅 Key 带不同。interval binary 不使用 Key，也不使用三分类窗口GT。因此两个组的interval ID、边界、标签和输入一致，group_equivalence.json记录相同的interval corpus SHA256；同一组结果同时适用于两种Key设置，不重复训练60次或制造两份独立证据。','',
     '## GT、输入、Loss 和输出','',
-    '一条rollout对应一个合并Align interval，包含多次尝试之间的间隙。event6对应最终failure，label=1；event8对应最终success，label=0。114intervals=92success+22failure，11个无目标标注rollout继续排除。没有in_progress/background、Gaussian或窗口级GT；每个interval一个硬标签、一个loss项、一个最终预测。','',
+    '一条rollout对应一个合并Align interval，包含多次尝试之间的间隙。annotation2对应failure，label=1；annotation1对应success，label=0。114intervals=92success+22failure，11个无目标标注rollout继续排除。没有in_progress/background、Gaussian或窗口级GT；每个interval一个硬标签、一个loss项、一个最终预测。','',
     '输入仅限该interval的[start,end]。末帧逐个有效相机帧推进，step=3：每个局部F6窗口为[t−45,t−42,…,t]的16个原始采样点，起始不足长度仅重复interval内首有效点，真实tactile缺口分段补齐；采样帧缺失则丢弃该窗口，不用未来数据填补。每个窗口一次冻结F6编码，官方finger-mode checkpoint→[5,256]→1280D；Deform只取该窗口末帧→五指2×2pool→2560D。整个interval形成[T,1280]和[T,2560]，T因interval而异。此次固定step3，不作n/step增强，n不参与binary标签。','',
     '每个时刻两路分别Linear→128D，Fusion逐时刻concat→256D。MLP：对整个interval的有效窗口特征作时间均值池化→Linear(128或256,128)→ReLU→Dropout(.1)→Linear(128,2)。GRU：完整按时间排序的窗口特征序列→单层单向GRU(hidden128)→最后hidden→Linear(128,2)；每个interval状态从零开始，不跨rollout。变长序列用pack处理，MLP均值排除batch padding。','',
     'softmax输出P(success),P(failure)，P(failure)≥0.5预测failure，否则success；不作Key命中或frame→interval投票。本实验利用已知完整interval边界，只诊断表征对最终结果的可分性，不代表在线检测完成时点的能力。','',
@@ -117,23 +118,23 @@ def main():
     '测试只有17个独立interval，其中failure仅3个；一次failure误判就改变failure recall 33.33个百分点、BA16.67个百分点。五seed不是五个独立测试集。这个诊断只能说明当前split和probe下的可分性，不能据此证明泛化或在线Key检测能力。不同任务的ACC/BA/F1不能直接比较。配对seed差异见paired_seed_differences.json；常数基线见constant_baselines.json。','',
     '原始数据interval_manifest.json保留边界、合并成员、split、每interval窗口数；features/<rollout>.npz保留raw采样帧/ticks、单次窗口F6特征、末帧Deform和interval标签。runs/seed_<seed>/<input>_<head>/保存best.pt、history.json、metrics.json、test_predictions.csv/npz，一行对应一个interval。summary.csv、per_seed.csv、per_class.csv提供全部指标。','',
     '全部30次指标重算、固定标签及split、源文件/encoder哈希、权重、标准化及epoch选择均检查通过；6个seed42 checkpoint在CPU重放。输入特征全部复用当前单次窗口encoder缓存，未使用旧的16特征叠加输入。','',
-    '```bash','source ./project_env.sh',f'PYTHONPATH="$PROJECT_ROOT/tools" CUBLAS_WORKSPACE_CONFIG=:4096:8 bash tools/run_trex.sh python -m sharpa_tactile.merged_interval_binary prepare --source {dm["source"]} --output outputs/sharpa_merged_interval_binary_data/<new_timestamp> --device cuda:0',f'PYTHONPATH="$PROJECT_ROOT/tools" CUBLAS_WORKSPACE_CONFIG=:4096:8 bash tools/run_trex.sh python -m sharpa_tactile.merged_interval_binary train --source {dataset.relative_to(ROOT)} --output outputs/sharpa_merged_interval_binary/<new_timestamp> --device cuda:0',f'PYTHONPATH="$PROJECT_ROOT/tools" bash tools/run_trex.sh python -m sharpa_tactile.report_merged_interval_binary --output {output.relative_to(ROOT)}','```']
+    '```bash','source ./project_env.sh',f'PYTHONPATH="$PROJECT_ROOT/tools" CUBLAS_WORKSPACE_CONFIG=:4096:8 bash tools/run_trex.sh python -m sharpa_tactile.merged_interval_binary prepare --source {dm["source"]} --output outputs/sharpa_merged_interval_binary_data/<new_timestamp> --device cuda:0',f'PYTHONPATH="$PROJECT_ROOT/tools" CUBLAS_WORKSPACE_CONFIG=:4096:8 bash tools/run_trex.sh python -m sharpa_tactile.merged_interval_binary train --source {relative_path(dataset)} --output outputs/sharpa_merged_interval_binary/<new_timestamp> --device cuda:0',f'PYTHONPATH="$PROJECT_ROOT/tools" bash tools/run_trex.sh python -m sharpa_tactile.report_merged_interval_binary --output {relative_path(output)}','```']
     (output/'README.md').write_text('\n'.join(lines)+'\n')
-    (dataset/'README.md').write_text('# 合并Align interval binary数据\n\n'+'\n'.join(lines[4:lines.index('## 指标及结果')])+'\n\n训练报告：`'+str(output.relative_to(ROOT))+'/README.md`。\n')
+    (dataset/'README.md').write_text('# 合并Align interval binary数据\n\n'+'\n'.join(lines[4:lines.index('## 指标及结果')])+'\n\n训练报告：`'+str(relative_path(output))+'/README.md`。\n')
     for name in ('report_merged_interval_binary.py','merged_online.py','train_intervals.py','train.py'):
-        shutil.copy2(ROOT/'tools/sharpa_tactile'/name,output/'code_snapshot'/name)
-    target=ROOT/'WeeklySummary/10.5/merged_interval_binary';target.mkdir(parents=True,exist_ok=False);copies=[]
+        shutil.copy2(project_path('tools/sharpa_tactile', name),output/'code_snapshot'/name)
+    target=project_path('WeeklySummary/10.5/merged_interval_binary');target.mkdir(parents=True,exist_ok=False);copies=[]
     def copy(src,dst):
         dst.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(src,dst);assert sha(src)==sha(dst)
-        copies.append(dict(source=str(src.relative_to(ROOT)),destination=str(dst.relative_to(ROOT)),sha256=sha(src)))
+        copies.append(dict(source=str(relative_path(src)),destination=str(relative_path(dst)),sha256=sha(src)))
     for name in ('README.md','summary.csv','per_seed.csv','per_class.csv','paired_seed_differences.json','constant_baselines.json','comparison.png','confusion_seed42.png','confusion_normalized.json','verification.json','run_manifest.json'):copy(output/name,target/name)
     for name in ('interval_manifest.json','group_equivalence.json'):copy(dataset/name,target/name)
     for result in results:
         rel=Path('runs')/f'seed_{result["seed"]}'/(result['input']+'_'+result['head'])
         for name in ('metrics.json','history.json','test_predictions.csv'):copy(output/rel/name,target/rel/name)
     dump(target/'copy_manifest.json',copies)
-    (target/'SOURCE_INDEX.md').write_text(f'# 来源\n\n数据：`{dataset.relative_to(ROOT)}`\n\n训练：`{output.relative_to(ROOT)}`\n\n权重与特征保留原目录，本目录复制文档和指标。\n')
-    weekly=ROOT/'WeeklySummary/10.5/10.5.md';text=weekly.read_text()
+    (target/'SOURCE_INDEX.md').write_text(f'# 来源\n\n数据：`{relative_path(dataset)}`\n\n训练：`{relative_path(output)}`\n\n权重与特征保留原目录，本目录复制文档和指标。\n')
+    weekly=project_path('WeeklySummary/10.5/10.5.md');text=weekly.read_text()
     section=['## 实验 9：合并 interval binary 可分性（30 次）','',
     '实验8两组只在Key带上不同，merged interval完全相同。binary移除Key/in_progress后两组同一数据，6模型×5seeds=30次独立训练，共享结果，不把重复跑相同数据视为两个对照。','',
     '一条merged Align interval一个样本，success0/failure1。原split80/17/17，类数量64/16、14/3、14/3。interval内step3的16点原始F6窗口各编码一次→1280D，Deform仅窗口末帧→2560D，组成变长特征序列。MLP对整个interval均值池化分类；GRU取完整序列最后hidden，状态不跨interval。encoder冻结，二分类softmax，failure概率≥.5判failure。CE按interval数量加权[.625,2.5]，val BA选epoch。','',

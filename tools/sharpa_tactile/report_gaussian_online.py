@@ -1,4 +1,5 @@
 """Recompute Gaussian sweep metrics, audit causality, publish two-group reports."""
+from .common import project_path, relative_path
 import argparse
 import csv
 import json
@@ -21,8 +22,8 @@ def csv_write(path,rows):
 
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--output',type=Path,required=True);a=parser.parse_args();output=a.output.resolve()
-    tm=json.loads((output/'training_manifest.json').read_text());source=ROOT/tm['source'];dm=json.loads((source/'dataset_manifest.json').read_text())
-    assert all(sha(ROOT/p)==v for p,v in tm['input_hashes'].items()) and all(sha(ROOT/p)==v for p,v in dm['input_hashes'].items())
+    tm=json.loads((output/'training_manifest.json').read_text());source=project_path(tm['source']);dm=json.loads((source/'dataset_manifest.json').read_text())
+    assert all(sha(project_path(p))==v for p,v in tm['input_hashes'].items()) and all(sha(project_path(p))==v for p,v in dm['input_hashes'].items())
     results=json.loads((output/'results.json').read_text());selection=json.loads((output/'sigma_selection.json').read_text());assert len(results)==120 and len(selection)==12
     split=json.loads((source/'split_manifest.json').read_text())
     assert not (set(split['train'])&set(split['val']) or set(split['train'])&set(split['test']) or set(split['val'])&set(split['test']))
@@ -33,7 +34,7 @@ def main():
     torch.set_num_threads(4);samples={g:read_samples(source,dm,g) for g in GROUPS};norms={g:normalization(samples[g]['train']) for g in GROUPS}
     rows=[];normalized=[];checks=[];chosen_results=[]
     for result in results:
-        directory=ROOT/result['directory'];stored=load(directory/'test_predictions.npz');test=samples[result['group']]['test']
+        directory=project_path(result['directory']);stored=load(directory/'test_predictions.npz');test=samples[result['group']]['test']
         labels=np.concatenate([s['labels'] for s in test]);assert np.array_equal(stored['labels'],labels)
         recomputed=metrics(labels,stored['probabilities'])
         for key in ('accuracy','balanced_accuracy','macro_f1','confusion_matrix','per_class','failure_false_positive_rate'):assert recomputed[key]==result['test'][key]
@@ -102,7 +103,7 @@ def main():
         test=samples[group]['test'];representatives=[next(i for i,s in enumerate(test) if s['outcome']==outcome) for outcome in (1,2)]
         selected=[r for r in chosen42 if r['group']==group]
         for col,result in enumerate(selected):
-            stored=load(ROOT/result['directory']/'test_predictions.npz')
+            stored=load(project_path(result['directory'], 'test_predictions.npz'))
             for oi,index in enumerate(representatives):
                 s=test[index];start,end=stored['offsets'][index:index+2];p=stored['probabilities'][start:end];q=one_sided_targets(s['positions'],s['key_index'],s['outcome'],result['sigma']);x=s['positions']-s['key_index'];ax=axes[gi*2+oi,col]
                 for k,c in enumerate(CLASSES):ax.plot(x,p[:,k],label=c)
@@ -111,9 +112,9 @@ def main():
                 for j in range(len(p)):curve_records.append(dict(group=group,input=result['input'],head=result['head'],sigma=result['sigma'],interaction_id=s['interaction_id'],rollout_id=s['rollout_id'],current_tick=int(s['ticks'][j]),current_frame=int(s['video_frames'][j]),key_frame=s['key'],relative_position=int(x[j]),hard_gt=int(s['labels'][j]),target_outcome=float(q[j,s['outcome']]),p_in_progress=float(p[j,0]),p_success=float(p[j,1]),p_failure=float(p[j,2])))
     axes[0,0].legend(fontsize=7);fig.suptitle('Deterministic examples: first success and first failure test interaction per group; seed42');fig.tight_layout();fig.savefig(output/'online_probability_curves.png',dpi=150);plt.close(fig);csv_write(output/'online_probability_curves.csv',curve_records)
     dump(output/'verification.json',dict(status='PASS',runs=120,selected_config_runs=60,hard_GT_fixed_across_sigma=True,metrics_recomputed=True,train_only_normalization=True,no_test_based_selection=True,source_hashes_unchanged=True,split_no_leakage=True,causal_checks=checks))
-    lines=['# Online tactile outcome detection：one-sided Gaussian 对照','',f'数据：`{source.relative_to(ROOT)}`；训练：`{output.relative_to(ROOT)}`。','',
+    lines=['# Online tactile outcome detection：one-sided Gaussian 对照','',f'数据：`{relative_path(source)}`；训练：`{relative_path(output)}`。','',
     '## Sample、Key、GT','',
-    '两组都只将Align作为interaction。原始组：event6=failure、event8=success，每个Align独立；start为该Align start，Key为其end，尾段到下一个Align start−1，最后一个到本rollout最后已标注end。合并组：全部Align与中间空隙合并，start取最早Align start、Key取最终Align end、outcome取最终Align类别，尾段到最后已标注end。早期failure在合并组不再是独立failure目标。Insert7/9不构造目标，只可能处于已标注尾段的传感器观察范围。','',
+    '两组都只将Align作为interaction。原始组：annotation2=failure、annotation1=success，每个Align独立；start为该Align start，Key为其end，尾段到下一个Align start−1，最后一个到本rollout最后已标注end。合并组：全部Align与中间空隙合并，start取最早Align start、Key取最终Align end、outcome取最终Align类别，尾段到最后已标注end。早期failure在合并组不再是独立failure目标。Insert stage不构造目标，只可能处于已标注尾段的传感器观察范围。','',
     '每个有效时刻是一条预测，标签只由last frame t与本interaction Key关系决定；不使用window后半段命中规则、不使用对称Key带。固定硬GT：t<Key→in_progress0；t≥Key→success1或failure2。在所有σ下完全相同，包含Key及已标注尾段。不同interaction开始重置标签和GRU状态。','',
     '训练soft target：Key对应首次camera frame≥Key的有效预测tick，d=max(key_index−current_index,0)，g=exp(−d²/(2σ²))；success=[1−g,g,0]，failure=[1−g,0,g]。Key前平滑上升，Key及之后永久为1直到本interaction观察结束；相反outcome概率为0。σ∈{1,2,3,4,6,8}的单位是有效同步预测样本，未进行额外降采样；缺失tick不作为样本，σ不是秒也不是encoder窗口数。soft Gaussian只用于训练，评估不用argmax soft target改写GT。','',
     '## 输入与模型','',
@@ -134,13 +135,13 @@ def main():
         lines.append(f"| {r['group']} | {r['input']} {r['head'].upper()} | {r['sigma']} | "+' | '.join(cells)+' |')
     lines+=['','[全部120次指标](all_runs.csv)；[72次seed42 σ sweep](sigma_sweep_seed42.csv)；[5seed汇总](summary.csv)；[逐run含per-class指标](results.json)；[完整归一化矩阵](confusion_normalized.json)。','','![sigma sweep](sigma_sweep.png)','','![count and normalized confusion](confusion_seed42_normalized.png)','','## Online probability curves','','按数据固定排序，各组选择第一个test success interaction和第一个test failure interaction，展示所选σ的6模型seed42结果，没有按曲线效果挑样本。横轴是相对Key的有效tick，虚线为Key，黑色点线是训练g；[曲线原始数据](online_probability_curves.csv)。曲线可检查提前形成confidence及Key后的稳定性，但两个示例不足以证明所有rollout均稳定。','','![online probability](online_probability_curves.png)','','## 验证','','120次指标从保存概率重算、最佳epoch和σ选择核对、所有checkpoint train-only标准化、原始sensor/encoder/cache哈希不变、rollout split无泄漏；12个所选seed42模型CPU replay、未来特征扰动不影响过去输出、prefix/streaming等价及新interaction重置均通过。CPU/GPU浮点backend概率回放允许atol=5e-4/rtol=1e-3，且要求全部argmax类别完全相同；每个模型实际最大误差已写入verification.json。详见[verification.json](verification.json)。','']
     (output/'README.md').write_text('\n'.join(lines).replace('## Online probability curves','## 当前结果的理解\n\n按所选σ的5seed test BA均值，合并组F6 MLP最高（54.94%±9.32%），原始Align组F6 GRU最高（54.61%±8.47%）；方差较大，不能据此确认模型优劣。Fusion没有显示稳定优势。合并组Deform/Fusion的failure recall仅约0.63%–1.59%，这轮plain soft CE仍没有解决稀少failure的识别；低FPR也可能伴随漏报，不能单独视为改进。原始组Deform GRU failure recall均值41.77%，同时FPR12.44%、precision15.74%，仍有明显误报。\n\n概率曲线中的固定failure示例存在持续低failure confidence或错判success，尚不能声称Gaussian已使Key前形成稳定且正确的outcome confidence。训练的g单调不意味着预测概率必须单调。本轮没有加入Gaussian以外的标签增强，也没有重跑相同GT下σ=0的hard-target baseline，因此不能把与历史不同GT实验的分数差异归因于Gaussian本身。\n\n'+'## Online probability curves'))
-    (source/'README.md').write_text('\n'.join(lines[:lines.index('## 所选σ：5 seed test结果')])+f'\n\n训练结果见 `{output.relative_to(ROOT)}/README.md`。\n')
-    target=ROOT/'WeeklySummary/10.5/gaussian_online';target.mkdir(parents=True,exist_ok=False);copies=[]
+    (source/'README.md').write_text('\n'.join(lines[:lines.index('## 所选σ：5 seed test结果')])+f'\n\n训练结果见 `{relative_path(output)}/README.md`。\n')
+    target=project_path('WeeklySummary/10.5/gaussian_online');target.mkdir(parents=True,exist_ok=False);copies=[]
     files=[p for p in output.iterdir() if p.is_file()]+list((output/'runs').rglob('metrics.json'))
     for p in files:
-        destination=target/p.relative_to(output);destination.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(p,destination);copies.append(dict(source=str(p.relative_to(ROOT)),destination=str(destination.relative_to(ROOT)),sha256=sha(p)))
-    dump(target/'copy_manifest.json',copies);assert all(sha(ROOT/r['destination'])==r['sha256']==sha(ROOT/r['source']) for r in copies)
-    weekly=ROOT/'WeeklySummary/10.5/10.5.md'
+        destination=target/p.relative_to(output);destination.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(p,destination);copies.append(dict(source=str(relative_path(p)),destination=str(relative_path(destination)),sha256=sha(p)))
+    dump(target/'copy_manifest.json',copies);assert all(sha(project_path(r['destination']))==r['sha256']==sha(project_path(r['source'])) for r in copies)
+    weekly=project_path('WeeklySummary/10.5/10.5.md')
     with weekly.open('a') as f:
         f.write('\n\n## 11. Align online one-sided Gaussian：固定硬GT与σ搜索\n\n'+ '\n'.join(lines[4:lines.index('## 数据分布')])+ '\n\n'+ '\n'.join(lines[lines.index('## 数据分布'):lines.index('## Online probability curves')]).replace('](all_runs.csv)','](gaussian_online/all_runs.csv)').replace('](sigma_sweep_seed42.csv)','](gaussian_online/sigma_sweep_seed42.csv)').replace('](summary.csv)','](gaussian_online/summary.csv)').replace('](results.json)','](gaussian_online/results.json)').replace('](confusion_normalized.json)','](gaussian_online/confusion_normalized.json)').replace('](sigma_sweep.png)','](gaussian_online/sigma_sweep.png)').replace('](confusion_seed42_normalized.png)','](gaussian_online/confusion_seed42_normalized.png)')+'\n\n[完整实验README、曲线与验证](gaussian_online/README.md)。\n\n![Online probability curves](gaussian_online/online_probability_curves.png)\n')
     snapshot=output/'code_snapshot';shutil.copy2(Path(__file__),snapshot/Path(__file__).name)

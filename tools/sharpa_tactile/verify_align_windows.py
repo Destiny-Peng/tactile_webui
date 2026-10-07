@@ -1,4 +1,6 @@
 """Audit hard Key labels, temporal sampling, split integrity, GRU causality and saved metrics."""
+from .common import project_path
+from .common import canonical_key, is_stage
 import argparse
 import csv
 import json
@@ -16,21 +18,21 @@ def verify(output, completed=False):
     split=json.loads((output/'split_manifest.json').read_text()); sets=[set(split[s]) for s in ('train','val','test')]
     assert not (sets[0]&sets[1] or sets[0]&sets[2] or sets[1]&sets[2])
     assert sha(output/'split_manifest.json')==signature['split_sha256']
-    source=ROOT/signature['source']; original=json.loads((source/'data_manifest.json').read_text())
+    source=project_path(signature['source']); original=json.loads((source/'data_manifest.json').read_text())
     assert sha(source/'data_manifest.json')==signature['source_manifest_sha256']
-    assert sha(ROOT/original['intervals'])==signature['annotation_sha256']
+    assert sha(project_path(original['intervals']))==signature['annotation_sha256']
     for key,digest in signature['encoder_sha256'].items():
-        path=ROOT/'checkpoints/T-Rex/encoders'/('f6_tactile_vqvae.pt' if key=='f6' else 'sharpa_wave_deform_encoder.pth')
+        path=project_path('checkpoints/T-Rex/encoders', 'f6_tactile_vqvae.pt' if key=='f6' else 'sharpa_wave_deform_encoder.pth')
         assert sha(path)==digest
-    for path,digest in signature['source_hashes'].items(): assert sha(ROOT/path)==digest
-    assert {e['event_key'] for e in events}=={6,8}
-    assert len(events)==sum(int(e['event_key']) in (6,8) for e in original['source_intervals'])
+    for path,digest in signature['source_hashes'].items(): assert sha(project_path(path))==digest
+    assert all(canonical_key(e) in (1,2) for e in events)
+    assert len(events)==sum(is_stage(e, 'align') for e in original['source_intervals'])
     for event in events:
         assert event['rollout_id'] in split[event['split']]
-        assert event['outcome']==(1 if event['event_key']==8 else 2)
+        assert event['outcome']==(canonical_key(event))
         frames=event['video_frames']
         for insert in original['source_intervals']:
-            if insert['rollout_id']==event['rollout_id'] and int(insert['event_key']) in (7,9):
+            if insert['rollout_id']==event['rollout_id'] and is_stage(insert, 'insert'):
                 assert not ((frames>=insert['start_frame'])&(frames<=insert['end_frame'])).any()
     assert np.isfinite(f6).all() and np.isfinite(deform).all()
     # Explicit closed-boundary and skipped-Key semantics.
@@ -49,7 +51,7 @@ def verify(output, completed=False):
                 assert (np.diff(frames)>=0).all() and frames[-1]==row['window_end_frame']
                 assert ticks.max()==ticks[-1] and len(frames)==16
                 if row['padded_frames']==0: assert (np.diff(frames)==row['step']).all()
-                assert row['event_key'] in (6,8) and row['rollout_id'] in split[name]
+                assert is_stage(row, 'align') and row['rollout_id'] in split[name]
                 if config['padding']=='drop': assert row['padded_frames']==0
             assert set(np.unique(data[name]['labels'])).issubset({0,1,2})
             counts=expanded_counts(meta,config if name=='train' else {**config,'jitter':0})

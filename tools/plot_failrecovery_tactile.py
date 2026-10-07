@@ -16,6 +16,8 @@ from matplotlib.ticker import MaxNLocator
 import numpy as np
 
 
+from sharpa_tactile.common import project_path
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 FINGERS = ("thumb", "index", "middle")
 COLORS = {"success": "#2474B5", "failure": "#D96B35"}
@@ -24,7 +26,7 @@ COLORS = {"success": "#2474B5", "failure": "#D96B35"}
 def read_series(record: dict) -> tuple[dict, dict]:
     grouped = {finger: [] for finger in FINGERS}
     invalid = {finger: 0 for finger in FINGERS}
-    with (PROJECT_ROOT / record["tactile_events_path"]).open() as handle:
+    with project_path(record["tactile_events_path"]).open() as handle:
         for line in handle:
             event = json.loads(line)
             finger = event["finger"]

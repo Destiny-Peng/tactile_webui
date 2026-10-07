@@ -1,5 +1,6 @@
 """Fixed-cache class-weight ablation followed by five paired training seeds."""
 from __future__ import annotations
+from .common import project_path, relative_path
 import argparse
 import csv
 import datetime
@@ -169,7 +170,7 @@ def main():
     split = json.loads((source/'split_manifest.json').read_text()); assert split['seed']==42
     verification = json.loads((source/'verification.json').read_text()); assert all(v=='PASS' for v in verification.values())
     for kind,filename in [('f6','f6_tactile_vqvae.pt'),('deform','sharpa_wave_deform_encoder.pth')]:
-        assert sha(ROOT/'checkpoints/T-Rex/encoders'/filename)==data['signature'][kind+'_sha256']
+        assert sha(project_path('checkpoints/T-Rex/encoders', filename))==data['signature'][kind+'_sha256']
     baseline_config = json.loads((source/'training_config.json').read_text())
     parameters = {key:baseline_config[key] for key in ('epochs','patience','batch_size','hidden','layers','lr','weight_decay')}
     assert parameters=={'epochs':30,'patience':8,'batch_size':8,'hidden':128,'layers':1,'lr':.001,'weight_decay':.0001}
@@ -185,12 +186,12 @@ def main():
     fn = torch.nn.functional.cross_entropy
     torch.testing.assert_close(fn(logits,target,weight=weights),fn(logits,target,weight=weights*7))
     torch.testing.assert_close(fn(logits,target),fn(logits,target,weight=torch.ones(3)))
-    config = {'source':str(source.relative_to(ROOT)),'output':str(out.relative_to(ROOT)),'device':args.device,
+    config = {'source':str(relative_path(source)),'output':str(relative_path(out)),'device':args.device,
         'seeds':list(SEEDS),'split_seed':42,'split_sha256':sha(source/'split_manifest.json'),
         'data_manifest_sha256':sha(source/'data_manifest.json'),'encoder_sha256':{k:data['signature'][k+'_sha256'] for k in ('f6','deform')},
         'parameters':parameters,'class_counts':counts.tolist(),'class_weights':{m:class_weights(counts,m).tolist() for m in WEIGHT_MODES},
         'log':f'logs/sharpa_weight_seeds_{out.name}.log',
-        'source_file_sha256':{str(p.relative_to(ROOT)):sha(p) for p in sorted((ROOT/'tools/sharpa_tactile').glob('*.py'))}}
+        'source_file_sha256':{str(relative_path(p)):sha(p) for p in sorted((project_path('tools/sharpa_tactile')).glob('*.py'))}}
     old_config = out/'suite_config.json'
     if old_config.exists() and json.loads(old_config.read_text())!=config: raise ValueError('Changed settings; use new output')
     dump(old_config,config); shutil.copyfile(source/'split_manifest.json',out/'split_manifest.json')
@@ -206,7 +207,7 @@ def main():
         assert result['training_class_counts']==counts.tolist()
         target_dir = destination/result['name']
         if not target_dir.exists(): shutil.copytree(source/result['name'],target_dir)
-        r = {**result,'weight_mode':'inverse_frequency','imported_from':str((source/result['name']).relative_to(ROOT))}
+        r = {**result,'weight_mode':'inverse_frequency','imported_from':str(relative_path(source/result['name']))}
         dump(target_dir/'IMPORT.json',{'source':r['imported_from'],'checkpoint_sha256':sha(source/result['name']/'best.pt'),
             'config_checked':True,'split_sha256':config['split_sha256']})
         dump(target_dir/'metrics.json',r); results.append(r)
@@ -234,7 +235,7 @@ def main():
     assert sha(source/'split_manifest.json')==config['split_sha256']
     assert sha(source/'data_manifest.json')==config['data_manifest_sha256']
     for kind,filename in [('f6','f6_tactile_vqvae.pt'),('deform','sharpa_wave_deform_encoder.pth')]:
-        assert sha(ROOT/'checkpoints/T-Rex/encoders'/filename)==config['encoder_sha256'][kind]
+        assert sha(project_path('checkpoints/T-Rex/encoders', filename))==config['encoder_sha256'][kind]
     print('WEIGHT_SEED_ABLATION_COMPLETE',len(results),flush=True)
 
 

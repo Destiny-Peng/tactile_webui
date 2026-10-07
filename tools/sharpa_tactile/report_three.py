@@ -1,4 +1,5 @@
 """Publish the completed three-class experiment and its audit trail."""
+from .common import project_path, relative_path
 import argparse
 import datetime
 import json
@@ -15,10 +16,10 @@ def main():
     data = json.loads((out/'data_manifest.json').read_text()); results = json.loads((out/'results.json').read_text())
     verification = json.loads((out/'verification.json').read_text()); online = json.loads((out/'online_verification.json').read_text())
     assert len(results) == 6 and all(value == 'PASS' for value in verification.values()) and online['status'] == 'PASS'
-    previous = ROOT/data['signature']['previous_output']
+    previous = project_path(data['signature']['previous_output'])
     assert sha(out/'split_manifest.json') == sha(previous/'split_manifest.json')
-    assert sha(ROOT/'checkpoints/T-Rex/encoders/f6_tactile_vqvae.pt') == data['signature']['f6_sha256']
-    assert sha(ROOT/'checkpoints/T-Rex/encoders/sharpa_wave_deform_encoder.pth') == data['signature']['deform_sha256']
+    assert sha(project_path('checkpoints/T-Rex/encoders/f6_tactile_vqvae.pt')) == data['signature']['f6_sha256']
+    assert sha(project_path('checkpoints/T-Rex/encoders/sharpa_wave_deform_encoder.pth')) == data['signature']['deform_sha256']
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
@@ -58,7 +59,7 @@ def main():
     for name in ('train','val','test'):
         c = data['split_counts'][name]
         counts.append(f"| {name} | {c['rollouts']} | {c['background_rows']} | {c['success_rows']} | {c['failure_rows']} | {c['usable_feature_rows']} |")
-    rel = out.relative_to(ROOT)
+    rel = relative_path(out)
     readme = f'''# Sharpa tactile 3-class frame-wise classification
 
 六组 frozen-encoder 三分类训练完成，替代本轮训练目标；旧 binary 实验和原始标注保留。
@@ -66,8 +67,8 @@ def main():
 ## Labels
 
 - Background = 0：所有目标 interval 之外的帧。
-- Success = 1：event 8/9 的 closed `[causal,observable]` 区间内所有帧。
-- Failure = 2：event 6/7 的 closed `[causal,observable]` 区间内所有帧。
+- Success = 1：annotation 1 的 closed `[causal,observable]` 区间内所有帧。
+- Failure = 2：annotation 2 的 closed `[causal,observable]` 区间内所有帧。
 - 无 Gaussian、soft label、label smoothing 或 -1 ignore label。每个原始视频帧都生成确定类别，完整标签见 frame_labels/*.npy。同类重叠保持原类别；异类重叠报错，不默默排除。本数据无异类冲突。
 - 仅事件 6–9 定义 success/failure；其他标签不定义新的类别，未落入目标 interval 的帧仍为 background。
 
@@ -143,9 +144,9 @@ predictor.reset()  # 每条新轨迹重置
     (out/'README.md').write_text(readme)
     dump(out/'experiment_manifest.json',{'created_at':datetime.datetime.now().astimezone().isoformat(),'status':'complete',
         'output':str(rel),'num_classes':3,'environment':'repos/ProcVLM/.venv','encoder_signature':data['signature'],
-        'trex_commit':subprocess.check_output(['git','-C',str(ROOT/'repos/T-Rex'),'rev-parse','HEAD'],text=True).strip(),
+        'trex_commit':subprocess.check_output(['git','-C',str(project_path('repos/T-Rex')),'rev-parse','HEAD'],text=True).strip(),
         'project_commit':subprocess.check_output(['git','-C',str(ROOT),'rev-parse','HEAD'],text=True).strip(),
-        'source_file_sha256':{str(p.relative_to(ROOT)):sha(p) for p in sorted((ROOT/'tools/sharpa_tactile').glob('*.py'))}})
+        'source_file_sha256':{str(relative_path(p)):sha(p) for p in sorted((project_path('tools/sharpa_tactile')).glob('*.py'))}})
     print('THREE_CLASS_REPORT_COMPLETE',str(rel),flush=True)
 
 

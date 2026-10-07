@@ -2,12 +2,20 @@
 set -euo pipefail
 PROJECT_ROOT="${PROJECT_ROOT:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)}"
 TREX_REPO="${TREX_REPO:-${PROJECT_ROOT}/repos/T-Rex}"
-TREX_PYTHON="${TREX_PYTHON:-python}"
-
 if [[ ! -d "${TREX_REPO}" ]]; then
     echo "T-Rex repo not found: ${TREX_REPO}" >&2
     echo "Set TREX_REPO or place T-Rex under repos/T-Rex." >&2
     exit 2
+fi
+
+if [[ -z "${TREX_PYTHON:-}" ]]; then
+    TREX_SOURCE_ROOT="$(cd -- "${TREX_REPO}" && pwd -P)"
+    TREX_ENV_PYTHON="${TREX_SOURCE_ROOT}/../ProcVLM/.venv/bin/python"
+    if [[ -x "$TREX_ENV_PYTHON" ]]; then
+        TREX_PYTHON="$TREX_ENV_PYTHON"
+    else
+        TREX_PYTHON="python3"
+    fi
 fi
 
 export PROJECT_ROOT

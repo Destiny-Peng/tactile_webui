@@ -1,4 +1,6 @@
 """Original event intervals, sixteen equal-weight hindsight outcome endpoints."""
+from .common import project_path, relative_path
+from .common import binary_target
 import argparse
 import csv
 import datetime
@@ -61,21 +63,21 @@ def prepare(args):
     source=args.source;original=json.loads((source/'interval_manifest.json').read_text())
     assert original['status']=='complete' and original['signature']['f6_context']=='interval_only'
     verified=json.loads((source/'verification.json').read_text());assert all(v=='PASS' for v in verified.values())
-    upstream=ROOT/original['signature']['source'];origin=json.loads((upstream/'data_manifest.json').read_text())
+    upstream=project_path(original['signature']['source']);origin=json.loads((upstream/'data_manifest.json').read_text())
     assert sha(upstream/'data_manifest.json')==original['signature']['source_manifest_sha256']
-    hashes={str(p.relative_to(ROOT)):sha(p) for p in (source/'interval_manifest.json',source/'verification.json',source/'split_manifest.json',upstream/'data_manifest.json',Path(__file__))}
+    hashes={str(relative_path(p)):sha(p) for p in (source/'interval_manifest.json',source/'verification.json',source/'split_manifest.json',upstream/'data_manifest.json',Path(__file__))}
     for key,filename in [('f6','f6_tactile_vqvae.pt'),('deform','sharpa_wave_deform_encoder.pth')]:
-        path=ROOT/'checkpoints/T-Rex/encoders'/filename;assert sha(path)==original['signature'][key+'_sha256'];hashes[str(path.relative_to(ROOT))]=sha(path)
+        path=project_path('checkpoints/T-Rex/encoders', filename);assert sha(path)==original['signature'][key+'_sha256'];hashes[str(relative_path(path))]=sha(path)
     for record in origin['records'].values():
         signature=origin['signature']['episode_sources'][record['id']]
         for key,hashkey in [('synchronized_frames_path','frames_sha256'),('tactile_events_path','events_sha256')]:
-            path=ROOT/record[key];assert sha(path)==signature[hashkey];hashes[record[key]]=signature[hashkey]
+            path=project_path(record[key]);assert sha(path)==signature[hashkey];hashes[record[key]]=signature[hashkey]
     events={(e['rollout_id'],e['event_index']):e for e in origin['source_intervals']};rows=[]
     for row in original['records']:
         event=events[(row['rollout_id'],row['event_index'])]
         assert event['event_key']==row['event_key'] and event['start_frame']==row['start_frame'] and event['end_frame']==row['end_frame']
-        assert row['label']==int(row['event_key'] in (6,7))
-        path=source/row['feature_path'];hashes[str(path.relative_to(ROOT))]=sha(path);data=load(path)
+        assert row['label']==binary_target(row)
+        path=source/row['feature_path'];hashes[str(relative_path(path))]=sha(path);data=load(path)
         assert data['f6'].shape==(row['ticks'],1280) and data['deform'].shape==(row['ticks'],2560)
         assert np.isfinite(data['f6']).all() and np.isfinite(data['deform']).all()
         assert data['video_frames'].min()>=row['start_frame'] and data['video_frames'].max()<=row['end_frame']
@@ -85,8 +87,8 @@ def prepare(args):
     shutil.copy2(source/'split_manifest.json',output/'split_manifest.json')
     assert len(rows)==259
     counts=original['split_counts'];assert counts=={'train':{'intervals':184,'success':129,'failure':55},'val':{'intervals':36,'success':28,'failure':8},'test':{'intervals':39,'success':29,'failure':10}}
-    assert all(sha(ROOT/path)==value for path,value in hashes.items())
-    dump(output/'prefix_manifest.json',dict(status='complete',created_at=datetime.datetime.now().astimezone().isoformat(),source=str(source.relative_to(ROOT)),records=rows,split_counts=counts,split_sha256=sha(output/'split_manifest.json'),input_hashes=hashes,class_mapping={'0':'success (8/9)','1':'failure (6/7)'},unit='original annotated event interval; no merge; no background',encoder_window=16,supervised_positions=16,fractions=(np.arange(1,17)/16).tolist(),endpoint_rule='ceil(k*T/16)-1 for k=1..16 over valid feature sequence; last=end; duplicates retain weight if T<16',features='full per-valid-tick sequence; continuous past16 F6 encoding and same-tick deform; interval-only F6 left padding; no sparse downstream input',hindsight_labels=True,training_started=False))
+    assert all(sha(project_path(path))==value for path,value in hashes.items())
+    dump(output/'prefix_manifest.json',dict(status='complete',created_at=datetime.datetime.now().astimezone().isoformat(),source=str(relative_path(source)),records=rows,split_counts=counts,split_sha256=sha(output/'split_manifest.json'),input_hashes=hashes,class_mapping={'0':'success (annotation 1)','1':'failure (annotation 2)'},unit='original annotated event interval; no merge; no background',encoder_window=16,supervised_positions=16,fractions=(np.arange(1,17)/16).tolist(),endpoint_rule='ceil(k*T/16)-1 for k=1..16 over valid feature sequence; last=end; duplicates retain weight if T<16',features='full per-valid-tick sequence; continuous past16 F6 encoding and same-tick deform; interval-only F6 left padding; no sparse downstream input',hindsight_labels=True,training_started=False))
     dump(output/'verification.json',dict(status='PASS',original_annotations_unchanged=True,original_259_intervals=True,equal_16_supervision_slots=True,closed_interval_feature_bounds=True,rollout_split_unchanged=True,source_sensor_hashes_verified=True,feature_source_verified=True,encoders_unchanged=True))
     snapshot=output/'code_snapshot';snapshot.mkdir();shutil.copy2(Path(__file__),snapshot/Path(__file__).name)
     print('PREFIX_DATA_COMPLETE',json.dumps(counts),flush=True)
@@ -122,8 +124,8 @@ def evaluate(model,samples,device):
 def train(args):
     output=args.output;output.mkdir(parents=True,exist_ok=False)
     manifest=json.loads((args.source/'prefix_manifest.json').read_text());samples=read_samples(args.source,manifest)
-    assert all(sha(ROOT/path)==value for path,value in manifest['input_hashes'].items())
-    hashes={str(p.relative_to(ROOT)):sha(p) for p in [args.source/'prefix_manifest.json',args.source/'split_manifest.json',Path(__file__)]+[args.source/r['feature_path'] for r in manifest['records']]}
+    assert all(sha(project_path(path))==value for path,value in manifest['input_hashes'].items())
+    hashes={str(relative_path(p)):sha(p) for p in [args.source/'prefix_manifest.json',args.source/'split_manifest.json',Path(__file__)]+[args.source/r['feature_path'] for r in manifest['records']]}
     norm=normalization(samples['train']);counts=np.bincount([r['label'] for r in samples['train']],minlength=2);positive_weight=float(counts[0]/counts[1]);results=[];started=time.monotonic()
     for seed in range(42,47):
         for kind in ('f6','deform','f6_deform'):
@@ -163,9 +165,9 @@ def train(args):
                 results.append(result);dump(output/'results.json',results)
                 print('PREFIX_TRAIN',len(results),30,seed,kind,head,'mean BA',test['mean_prefix_balanced_accuracy'],'final BA',test['final_endpoint']['balanced_accuracy'],'epoch',best_epoch,'elapsed',round(time.monotonic()-started),flush=True)
                 del model,optimizer
-    assert all(sha(ROOT/path)==value for path,value in hashes.items())
+    assert all(sha(project_path(path))==value for path,value in hashes.items())
     snapshot=output/'code_snapshot';snapshot.mkdir();shutil.copy2(Path(__file__),snapshot/Path(__file__).name)
-    dump(output/'run_manifest.json',dict(status='complete',dataset=str(args.source.relative_to(ROOT)),seeds=list(range(42,47)),unique_runs=30,device=args.device,environment='repos/ProcVLM/.venv',torch_version=str(torch.__version__),git_commit=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),input_hashes=hashes,split_sha256=manifest['split_sha256'],elapsed_seconds=time.monotonic()-started,loss='BCEWithLogitsLoss pos_weight=129/55; mean16 endpoints per interval then mean intervals',selection='maximum validation mean BA across16 positions; first tie',batch_size=8,epochs=30,patience=8,lr=.001,weight_decay=.0001,clip=1,hidden=128,gru_layers=1,encoder_frozen=True))
+    dump(output/'run_manifest.json',dict(status='complete',dataset=str(relative_path(args.source)),seeds=list(range(42,47)),unique_runs=30,device=args.device,environment='repos/ProcVLM/.venv',torch_version=str(torch.__version__),git_commit=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),input_hashes=hashes,split_sha256=manifest['split_sha256'],elapsed_seconds=time.monotonic()-started,loss='BCEWithLogitsLoss pos_weight=129/55; mean16 endpoints per interval then mean intervals',selection='maximum validation mean BA across16 positions; first tie',batch_size=8,epochs=30,patience=8,lr=.001,weight_decay=.0001,clip=1,hidden=128,gru_layers=1,encoder_frozen=True))
 
 
 def main():

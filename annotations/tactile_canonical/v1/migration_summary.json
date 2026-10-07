@@ -1,0 +1,98 @@
+{
+  "before_label_intervals": {
+    "0": 0,
+    "1": 0,
+    "2": 0,
+    "3": 157,
+    "4": 382,
+    "6": 124,
+    "7": 4,
+    "8": 187,
+    "9": 183
+  },
+  "after_mapping_before_filter": {
+    "1": 370,
+    "2": 128,
+    "3": 157,
+    "4": 382
+  },
+  "discarded_success_34": 2,
+  "discarded_success_34_by_label": {
+    "3": 0,
+    "4": 2
+  },
+  "background_records_ignored": 0,
+  "exact_duplicates": 682,
+  "final": {
+    "1": {
+      "rollouts": 92,
+      "intervals": 186
+    },
+    "2": {
+      "rollouts": 53,
+      "intervals": 73
+    },
+    "3": {
+      "rollouts": 24,
+      "intervals": 33
+    },
+    "4": {
+      "rollouts": 18,
+      "intervals": 61
+    }
+  },
+  "input_intervals": 1037,
+  "output_intervals": 353,
+  "annotated_rollouts": 120,
+  "scope": "All 125 USB rollouts in authoritative failrecovery manifest; union of all snapshots; no latest-wins",
+  "manifest_outcomes": {
+    "success": 92,
+    "failure": 33
+  },
+  "per_source_before": {
+    "/mnt/hdd/qiuxia/pyr/LF3R/outputs/usb_event_intervals/20261003_202352/original_annotations_backup_20261003_203655/records": {
+      "6": 69,
+      "8": 94,
+      "9": 92,
+      "7": 4,
+      "3": 7
+    },
+    "/mnt/hdd/qiuxia/pyr/LF3R/annotations/failure_annotations/v1/records": {
+      "4": 54,
+      "8": 93,
+      "9": 91,
+      "6": 39,
+      "3": 26
+    },
+    "/mnt/hdd/qiuxia/pyr/LF3R/outputs/sharpa_failure_relabel/20261006_165000/original_annotations_backup": {
+      "4": 56,
+      "3": 18,
+      "6": 6
+    },
+    "/mnt/hdd/qiuxia/pyr/LF3R/outputs/sharpa_failure_relabel/20261006_165000/source_intervals.json": {
+      "4": 56,
+      "3": 18
+    },
+    "/mnt/hdd/qiuxia/pyr/LF3R/outputs/sharpa_failure_relabel/20261006_185200_frame3/original_annotations_backup": {
+      "4": 56,
+      "3": 18,
+      "6": 6
+    },
+    "/mnt/hdd/qiuxia/pyr/LF3R/outputs/sharpa_failure_relabel/20261006_185200_frame3/source_intervals.json": {
+      "4": 56,
+      "3": 18
+    },
+    "/mnt/hdd/qiuxia/pyr/LF3R/outputs/sharpa_failure_relabel/20261006_214500_updated/original_annotations_backup": {
+      "4": 52,
+      "3": 26,
+      "6": 4
+    },
+    "/mnt/hdd/qiuxia/pyr/LF3R/outputs/sharpa_failure_relabel/20261006_214500_updated/source_intervals.json": {
+      "4": 52,
+      "3": 26
+    }
+  },
+  "excluded_non_tactile_source_events": 36,
+  "validation": "PASS",
+  "created_at": "2026-10-07T18:37:23.084553+08:00"
+}

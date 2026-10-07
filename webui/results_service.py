@@ -33,7 +33,8 @@ class OnlineResultsService:
         preferred = ["p_in_progress", "p_success", "p_failure"]
         if all(name in names for name in preferred):
             return preferred
-        for candidate in (["p0", "p1", "p2"], ["p_0", "p_1", "p_2"]):
+        for candidate in (["p0", "p1", "p2"], ["p_0", "p_1", "p_2"],
+                          ["background_probability", "success_probability", "failure_probability"]):
             if all(name in names for name in candidate):
                 return list(candidate)
         return []

@@ -1,4 +1,6 @@
 from __future__ import annotations
+from .common import project_path, relative_path
+from .common import ANNOTATION_ROOT
 import argparse
 import datetime
 import json
@@ -54,8 +56,8 @@ def reconstruction_once(encoders, arrays, streams, out, record):
 
 def main():
     parser = argparse.ArgumentParser(description='Cache frozen tactile features and make shared rollout splits')
-    parser.add_argument('--intervals',type=Path,default=ROOT/'outputs/usb_event_intervals/20261003_202352/intervals.jsonl')
-    parser.add_argument('--manifest',type=Path,default=ROOT/'datasets/failrecovery/manifest.jsonl')
+    parser.add_argument('--intervals',type=Path,default=ANNOTATION_ROOT/'intervals.jsonl')
+    parser.add_argument('--manifest',type=Path,default=project_path('datasets/lf3r_failure_rollouts/v1/failrecovery_manifest.jsonl'))
     parser.add_argument('--output',type=Path,required=True)
     parser.add_argument('--device',default='cuda:0')
     parser.add_argument('--batch-size',type=int,default=16)
@@ -63,7 +65,7 @@ def main():
     parser.add_argument('--camera',default='cam_high')
     args=parser.parse_args();torch.set_num_threads(2)
     args.output.mkdir(parents=True,exist_ok=True);cache=args.output/'features';cache.mkdir(exist_ok=True)
-    sources=load_sources(args.intervals,args.manifest)
+    sources=load_sources(args.intervals,args.manifest,label_keys=(1,2))
     records={rid:r for rid,(r,_) in sources.items()}
     arrays={rid:episode_arrays(r,events,args.camera) for rid,(r,events) in sources.items()}
     split=rollout_split(records,{rid:a['labels'] for rid,a in arrays.items()},args.seed)
@@ -73,14 +75,14 @@ def main():
                'f6_sha256':sha(encoders.f6_path),'deform_sha256':sha(encoders.deform_path),
                'camera':args.camera,'window':16,'f6_hand':'right','f6_feature':'continuous pre-quantization, flatten 5x256',
                'deform_feature':'frozen T-Rex DeformEncoder -> AdaptiveAvgPool2d(2,2) -> flatten 5x512',
-               'cache_dtype':'float32','encoder_precision':'float32; TF32 disabled','binary':{'0':'success (8/9)','1':'failure (6/7)'},
+               'cache_dtype':'float32','encoder_precision':'float32; TF32 disabled','binary':{'0':'success (annotation 1)','1':'failure (annotation 2)'},
                'interval_bounds':'closed [causal,observable]','unlabelled':'loss ignored; past context retained',
                'causality':'F6 t-15:t; sync event receive_mono_ns <= tick_mono_ns; no future filling',
                'invalid_samples':'drop sample if any of 16 ticks invalid; reset sequence across gaps'}
-    signature['episode_sources']={rid:{'frames_sha256':sha(ROOT/r['synchronized_frames_path']),
-        'events_sha256':sha(ROOT/r['tactile_events_path']),
-        'deform_streams':{finger:{'size':(ROOT/r['tactile_stream_paths'][finger]['deform']).stat().st_size,
-        'mtime_ns':(ROOT/r['tactile_stream_paths'][finger]['deform']).stat().st_mtime_ns} for finger in FINGERS}}
+    signature['episode_sources']={rid:{'frames_sha256':sha(project_path(r['synchronized_frames_path'])),
+        'events_sha256':sha(project_path(r['tactile_events_path'])),
+        'deform_streams':{finger:{'size':(project_path(r['tactile_stream_paths'][finger]['deform'])).stat().st_size,
+        'mtime_ns':(project_path(r['tactile_stream_paths'][finger]['deform'])).stat().st_mtime_ns} for finger in FINGERS}}
         for rid,r in records.items()}
     old=args.output/'data_manifest.json'
     if old.exists() and json.loads(old.read_text())['signature']!=signature:
@@ -108,7 +110,7 @@ def main():
                 f6_features.append(f6);deform_features.append(deform)
         temp=target.with_suffix('.tmp.npz')
         np.savez_compressed(temp,f6=np.concatenate(f6_features),deform=np.concatenate(deform_features),
-                            labels=arr['labels'],video_frames=arr['video_frames'],ticks=arr['ticks'],
+                            labels=arr['labels'],annotation_labels=arr['annotation_labels'],video_frames=arr['video_frames'],ticks=arr['ticks'],
                             segment_starts=arr['segment_starts'])
         temp.replace(target)
         print(f'CACHE {i+1}/{len(sources)} rows={len(endpoints)} seconds={time.monotonic()-started:.1f} {rid}',flush=True)
@@ -116,7 +118,7 @@ def main():
     summary={name:{'rollouts':len(split[name]),'failure_rows':sum(audit[r]['failure_rows'] for r in split[name]),
                    'success_rows':sum(audit[r]['success_rows'] for r in split[name])} for name in ('train','val','test')}
     dump(args.output/'data_manifest.json',{'signature':signature,'created_at':datetime.datetime.now().astimezone().isoformat(),
-         'intervals':str(args.intervals.relative_to(ROOT)),'manifest':str(args.manifest.relative_to(ROOT)),
+         'intervals':str(args.intervals.resolve()),'manifest':str(relative_path(args.manifest)),
          'source_intervals':[e for _,events in sources.values() for e in events],
          'records':records,'audit':audit,'split_counts':summary,'status':'complete'})
     print('PREPARE_COMPLETE',json.dumps(summary),flush=True)

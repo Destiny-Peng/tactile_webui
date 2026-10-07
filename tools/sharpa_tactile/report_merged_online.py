@@ -1,4 +1,6 @@
 """Verify and publish one-encoder-window merged-rollout experiments."""
+from .common import project_path, relative_path
+from .common import is_stage
 import argparse
 import csv
 import json
@@ -20,20 +22,20 @@ def csv_write(path,records):
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--output',type=Path,required=True)
     args=parser.parse_args();output=args.output.resolve()
-    run=json.loads((output/'run_manifest.json').read_text());dataset=ROOT/run['dataset']
+    run=json.loads((output/'run_manifest.json').read_text());dataset=project_path(run['dataset'])
     dm=json.loads((dataset/'dataset_manifest.json').read_text());rows=dm['rollouts'];results=json.loads((output/'results.json').read_text())
     assert len(results)==60
-    sensor=json.loads((ROOT/dm['source']/'source_sensor_integrity.json').read_text())
+    sensor=json.loads((project_path(dm['source'], 'source_sensor_integrity.json')).read_text())
     assert sensor['status']=='PASS'
     assert all(dm['input_hashes'][path]==value for path,value in sensor['source_sensor_hashes'].items())
-    assert all(sha(ROOT/p)==value for p,value in run['input_hashes'].items())
-    assert all(sha(ROOT/p)==value for p,value in dm['input_hashes'].items())
+    assert all(sha(project_path(p))==value for p,value in run['input_hashes'].items())
+    assert all(sha(project_path(p))==value for p,value in dm['input_hashes'].items())
     banks=load(dataset/'features.npz');tables={k:torch.from_numpy(v) for k,v in banks.items()};meta=load(dataset/'windows.npz')
     paths=json.loads((dataset/'paths.json').read_text());torch.set_num_threads(4)
     assert (np.diff(meta['ticks'],axis=1)>=0).all()
     assert all(np.all(meta['frames'][meta['rollout_index']==i]>=row['annotation_start']) and np.all(meta['frames'][meta['rollout_index']==i]<=row['annotation_end']) for i,row in enumerate(rows))
     for row in rows:
-        aligns=[e for e in row['events'] if e['event_key'] in (6,8)]
+        aligns=[e for e in row['events'] if is_stage(e, 'align')]
         unit=row['merged_align'];assert unit['start_frame']==min(e['start_frame'] for e in aligns) and unit['end_frame']==max(e['end_frame'] for e in aligns)
         assert set(unit['member_indices'])=={e['event_index'] for e in aligns}
     split=json.loads((dataset/'split_manifest.json').read_text())
@@ -116,9 +118,9 @@ def main():
     fig.suptitle('Seed 42; top=symmetric merged; bottom=asymmetric merged');fig.tight_layout();fig.savefig(output/'confusion_seed42.png',dpi=160);plt.close(fig)
     dump(output/'verification.json',dict(status='PASS',runs=60,source_sensor_baseline_verified=True,source_hashes_unchanged=True,fixed_ready_arrays=True,metrics_recomputed=True,one_align_per_rollout=True,rollout_split_checked=True,checkpoint_cpu_replays=replays,causal_and_streaming_gru_checks=causal_checks,normalization='train selected unique windows only',selection='validation BA first maximum'))
     lines=['# 全 rollout 合并 + 单次窗口 encoder 的三分类实验','',
-    f'训练目录：`{output.relative_to(ROOT)}`；数据集：`{dataset.relative_to(ROOT)}`。2 组 × F6/Deform/Fusion × MLP/单向 GRU × seeds 42–46，共 60 次。','',
+    f'训练目录：`{relative_path(output)}`；数据集：`{relative_path(dataset)}`。2 组 × F6/Deform/Fusion × MLP/单向 GRU × seeds 42–46，共 60 次。','',
     '## 本轮修正','',
-    '114 个 rollout（92 success、22 failure）均只对应一个 Align interval。取全部 Align 6/8 的最早 start 至最晚 end，中间空隙纳入；根据原 manifest 的 ground_truth_outcome 和最终 Align 标签核对，success rollout 合并为 success、failure rollout 的多个 failure interval 也合并为一个 failure。仅保留最后 end 的 Key。那 11 个无 6/7/8/9 标注的 rollout 继续排除。Insert 仅提供 Key 上限和窗口上下文，不独立分类。','',
+    '114 个 rollout（92 success、22 failure）均只对应一个 Align interval。取全部 Align stage 的最早 start 至最晚 end，中间空隙纳入；根据原 manifest 的 ground_truth_outcome 和最终 Align 标签核对，success rollout 合并为 success、failure rollout 的多个 failure interval 也合并为一个 failure。仅保留最后 end 的 Key。那 11 个无 canonical1/2 标注的 rollout 继续排除。Insert 仅提供 Key 上限和窗口上下文，不独立分类。','',
     'symmetric_merged：Key=[merged end−n, merged end+n]。asymmetric_merged：Key=[merged end−n,终态 Align 后第一个 Insert start+n]；无后续 Insert 则回退 end+n。两组都合并，区别仅为 Key 的上限；Key 裁剪到该 rollout 的所有标注首 start/末 end 范围。合并 interval outcome 为 success/failure，但不会将其全部帧直接赋成该类：窗口后 8 个采样点命中最终 Key 才赋该类，否则 in_progress=0；保留原始间隙上下文，没有早期 failure Key。','',
     '## 输入、模型和输出','',
     '对末帧 t，输入恰为 [t−15×step,…,t] 的 16 个实际采样点（起点不足时重复范围内首个有效帧）。F6 将这个 [16,5,6] 原始窗口交给冻结 encoder **一次**，得到 [5,256]，flatten→1280D。实际官方 midtrain checkpoint 是 finger mode，不改为 hand mode；代码默认 hand mode 与本 checkpoint 的配置不同。不会给下游再叠 16 个 F6 encoder 特征。Deform 只取同一窗口末帧的五指 [5,1,240,240]，冻结 encoder 后每指 AdaptiveAvgPool(2×2)→512D，五指拼为2560D；复用对应末帧的冻结 Deform cache。','',
@@ -146,22 +148,22 @@ def main():
     '本轮同时修正了失败rollout的合并和下游输入/GRU历史处理，旧实验7分数不能直接当作本轮基线。两组Key/GT仍不同，比较时先看同组模态和模型；5seeds只衡量训练随机性，未覆盖新的split。测试failure来自3个failure-only rollout，窗口重叠不构成独立试验，不能把窗口支持量当成独立数据量。','',
     'summary.csv为12组汇总，per_seed.csv为60次ACC/BA/F1/FPR，per_class.csv为逐类precision/recall/F1/support，paired_seed_differences.json为同组Fusion减单模态的配对seed BA差异。runs/<group>/seed_<seed>/<input>_<head>/保存checkpoint、history、metrics、逐窗概率CSV/NPZ。dataset_manifest.json保留每个rollout的合并成员和Key边界；windows.npz记录exact16采样帧/ticks，features.npz记录单次F6编码及末帧Deform。','',
     '验证全部60次测试指标、固定ready数组、原split和输入/encoder哈希；12个seed42 checkpoint CPU重放，6个GRU通过前缀因果与分段携带状态等价检查。','',
-    '```bash',f'PYTHONPATH="$PROJECT_ROOT/tools" CUBLAS_WORKSPACE_CONFIG=:4096:8 bash tools/run_trex.sh python -m sharpa_tactile.merged_online prepare --source {dm["source"]} --output outputs/sharpa_merged_online_datasets/<new_timestamp> --device cuda:0',f'PYTHONPATH="$PROJECT_ROOT/tools" CUBLAS_WORKSPACE_CONFIG=:4096:8 bash tools/run_trex.sh python -m sharpa_tactile.merged_online train --source {dataset.relative_to(ROOT)} --output outputs/sharpa_merged_online_training/<new_timestamp> --device cuda:0',f'PYTHONPATH="$PROJECT_ROOT/tools" bash tools/run_trex.sh python -m sharpa_tactile.report_merged_online --output {output.relative_to(ROOT)}','```']
+    '```bash',f'PYTHONPATH="$PROJECT_ROOT/tools" CUBLAS_WORKSPACE_CONFIG=:4096:8 bash tools/run_trex.sh python -m sharpa_tactile.merged_online prepare --source {dm["source"]} --output outputs/sharpa_merged_online_datasets/<new_timestamp> --device cuda:0',f'PYTHONPATH="$PROJECT_ROOT/tools" CUBLAS_WORKSPACE_CONFIG=:4096:8 bash tools/run_trex.sh python -m sharpa_tactile.merged_online train --source {relative_path(dataset)} --output outputs/sharpa_merged_online_training/<new_timestamp> --device cuda:0',f'PYTHONPATH="$PROJECT_ROOT/tools" bash tools/run_trex.sh python -m sharpa_tactile.report_merged_online --output {relative_path(output)}','```']
     (output/'README.md').write_text('\n'.join(lines)+'\n')
-    (dataset/'README.md').write_text('# 全 rollout 合并的单窗口特征数据集\n\n'+ '\n'.join(lines[4:lines.index('## 测试指标')])+'\n\n训练报告：`'+str(output.relative_to(ROOT))+'/README.md`。数据生成时 training_started=false 为生成阶段记录。\n')
-    target=ROOT/'WeeklySummary/10.5/merged_online';target.mkdir(parents=True,exist_ok=False);copies=[]
+    (dataset/'README.md').write_text('# 全 rollout 合并的单窗口特征数据集\n\n'+ '\n'.join(lines[4:lines.index('## 测试指标')])+'\n\n训练报告：`'+str(relative_path(output))+'/README.md`。数据生成时 training_started=false 为生成阶段记录。\n')
+    target=project_path('WeeklySummary/10.5/merged_online');target.mkdir(parents=True,exist_ok=False);copies=[]
     def copy(source,dest):
         dest.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(source,dest);assert sha(source)==sha(dest)
-        copies.append(dict(source=str(source.relative_to(ROOT)),destination=str(dest.relative_to(ROOT)),sha256=sha(source)))
+        copies.append(dict(source=str(relative_path(source)),destination=str(relative_path(dest)),sha256=sha(source)))
     for name in ('README.md','summary.csv','per_seed.csv','per_class.csv','paired_seed_differences.json','verification.json','run_manifest.json','comparison.png','confusion_seed42.png','confusion_seed42_normalized.png','confusion_normalized.json'):copy(output/name,target/name)
     copy(dataset/'dataset_manifest.json',target/'dataset_manifest.json')
     for result in results:
         rel=Path('runs')/result['group']/f'seed_{result["seed"]}'/(result['input']+'_'+result['head'])
         for name in ('history.json','metrics.json','test_predictions.csv'):copy(output/rel/name,target/rel/name)
     dump(target/'copy_manifest.json',copies)
-    (target/'SOURCE_INDEX.md').write_text(f'# 来源\n\n原始训练：`{output.relative_to(ROOT)}`\n\n原始数据：`{dataset.relative_to(ROOT)}`\n\n权重、特征、完整预测NPZ在原目录；本目录复制文档和指标。\n')
+    (target/'SOURCE_INDEX.md').write_text(f'# 来源\n\n原始训练：`{relative_path(output)}`\n\n原始数据：`{relative_path(dataset)}`\n\n权重、特征、完整预测NPZ在原目录；本目录复制文档和指标。\n')
     shutil.copy2(Path(__file__),output/'code_snapshot'/Path(__file__).name)
-    weekly=ROOT/'WeeklySummary/10.5/10.5.md';text=weekly.read_text()
+    weekly=project_path('WeeklySummary/10.5/10.5.md');text=weekly.read_text()
     text=text.replace('## 实验 7：修正数据集的训练测试（60 次）','## 实验 7：旧输入实现的训练测试（60 次，历史结果）')
     old='## 实验 7：旧输入实现的训练测试（60 次，历史结果）'
     text=text.replace(old,old+'\n\n本实验将16个F6 encoder特征又叠成下游窗口、Deform使用整个序列，且failure-only的多个interval未合并；与用户澄清后的设计不一致。本轮正确输入和全部rollout合并见实验8；此处保留历史记录。')

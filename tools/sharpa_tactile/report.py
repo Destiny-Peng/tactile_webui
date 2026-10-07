@@ -1,5 +1,6 @@
 """Summarize the completed six-group frozen tactile experiment."""
 from __future__ import annotations
+from .common import project_path, relative_path
 import argparse
 import datetime
 import json
@@ -21,8 +22,8 @@ def main():
     verify=json.loads((out/'verification.json').read_text())
     assert len(results)==6 and len({r['name'] for r in results})==6
     assert online['status']=='PASS' and all(v=='PASS' for k,v in verify.items() if k!='deform_512D_contract')
-    assert sha(ROOT/'checkpoints/T-Rex/encoders/f6_tactile_vqvae.pt')==data['signature']['f6_sha256']
-    assert sha(ROOT/'checkpoints/T-Rex/encoders/sharpa_wave_deform_encoder.pth')==data['signature']['deform_sha256']
+    assert sha(project_path('checkpoints/T-Rex/encoders/f6_tactile_vqvae.pt'))==data['signature']['f6_sha256']
+    assert sha(project_path('checkpoints/T-Rex/encoders/sharpa_wave_deform_encoder.pth'))==data['signature']['deform_sha256']
     for r in results:
         assert (out/r['name']/'best.pt').is_file()
         assert r['test']['n']==2106
@@ -49,10 +50,10 @@ def main():
     counts=['| Split | Rollouts | Success ticks | Failure ticks |','|---|---:|---:|---:|']
     for name in ('train','val','test'):
         c=data['split_counts'][name];counts.append(f"| {name} | {c['rollouts']} | {c['success_rows']} | {c['failure_rows']} |")
-    rel=out.relative_to(ROOT)
+    rel=relative_path(out)
     readme=f'''# Sharpa tactile binary representation ablation
 
-六组 first-stage frozen-encoder 对照已实现并完成训练。Binary 标签 success=0（8/9）、failure=1（6/7）。仅目标 interval 内帧有监督；其他标签和区间外帧不作为 success。原始标注未改写。
+六组 first-stage frozen-encoder 对照已实现并完成训练。Binary 标签 success target=0（annotation1）、failure target=1（annotation2）。仅目标 interval 内帧有监督；其他标签和区间外帧不作为 success。原始标注未改写。
 
 ## Architecture
 
@@ -129,15 +130,15 @@ predictor.reset()
 这是一个固定 split、单 seed 的小数据初步对照；不能据此声称某种表征有稳定优势。评估范围是已标注 interval 内 binary 状态，尚未衡量无标签背景的误报警。历史上下文来自同一条轨迹；其他轨迹不共享 LSTM state。
 '''
     if args.superseded:
-        readme+=f'\n旧诊断输出 `{args.superseded.relative_to(ROOT)}` 因批量/逐帧浮点误差放大而被本次运行替代，不用于最终对照。split、seed、模型大小和训练预算保持一致；修改只针对数值一致性，未根据 test 指标调参。\n'
+        readme+=f'\n旧诊断输出 `{relative_path(args.superseded)}` 因批量/逐帧浮点误差放大而被本次运行替代，不用于最终对照。split、seed、模型大小和训练预算保持一致；修改只针对数值一致性，未根据 test 指标调参。\n'
         (args.superseded/'SUPERSEDED.md').write_text(f'此运行被 {rel} 替代。真实在线一致性检查发现近常量特征放大 CPU/GPU、batch-size 数值误差；最终运行关闭 TF32 并设置 std 下限 0.01。请使用新目录结果。\n')
     (out/'README.md').write_text(readme)
     stamp=datetime.datetime.now().astimezone().isoformat()
     provenance={'created_at':stamp,'status':'complete','output':str(rel),
-      'trex_commit':subprocess.check_output(['git','-C',str(ROOT/'repos/T-Rex'),'rev-parse','HEAD'],text=True).strip(),
+      'trex_commit':subprocess.check_output(['git','-C',str(project_path('repos/T-Rex')),'rev-parse','HEAD'],text=True).strip(),
       'project_commit':subprocess.check_output(['git','-C',str(ROOT),'rev-parse','HEAD'],text=True).strip(),
       'environment':'repos/ProcVLM/.venv','encoder_signature':data['signature'],
-      'source_file_sha256':{str(p.relative_to(ROOT)):sha(p) for p in sorted((ROOT/'tools/sharpa_tactile').glob('*.py'))}}
+      'source_file_sha256':{str(relative_path(p)):sha(p) for p in sorted((project_path('tools/sharpa_tactile')).glob('*.py'))}}
     dump(out/'experiment_manifest.json',provenance)
     print(json.dumps({'status':'complete','output':str(rel),'groups':6,'online_max_difference':online['max_abs_difference']},indent=2))
 

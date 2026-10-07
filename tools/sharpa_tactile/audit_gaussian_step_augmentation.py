@@ -1,4 +1,5 @@
 """Record the existing unaugmented baseline before defining a new step ablation."""
+from .common import project_path, relative_path
 import argparse
 import csv
 import datetime
@@ -11,7 +12,7 @@ from .merged_online import load
 
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--output',type=Path,required=True);args=parser.parse_args();out=args.output.resolve();out.mkdir(parents=True,exist_ok=False)
-    source=ROOT/'outputs/sharpa_gaussian_online/20261005_182000';dataset=ROOT/'outputs/sharpa_gaussian_online_data/20261005_182000';aligned=source/'key_aligned_20261005_184000'
+    source=project_path('outputs/sharpa_gaussian_online/20261005_182000');dataset=project_path('outputs/sharpa_gaussian_online_data/20261005_182000');aligned=source/'key_aligned_20261005_184000'
     protocol=json.loads((source/'protocol.json').read_text());dm=json.loads((dataset/'dataset_manifest.json').read_text());selected=json.loads((source/'sigma_selection.json').read_text())
     config=next(r for r in selected if r['group']=='original_align' and r['input']=='deform' and r['head']=='gru');assert config['sigma']==8
     assert 'no augmentation' in protocol['loss'] and 'no augmentation' in dm['loss']
@@ -41,12 +42,12 @@ def main():
             ax.axvline(0,color='red',linestyle=':');ax.set_ylim(0,1);ax.set_title(f'{split.upper()} | {name.title()} GT | all {len(members)} interactions');ax.set_xlabel('Time relative to Key (s)');ax.set_ylabel('Probability');ax.grid(alpha=.15)
     axes[0,0].legend();fig.suptitle('Existing NO-augmentation baseline | original Align / Deform GRU / sigma8 / seed42\nMean ± interaction SD; no new training');fig.tight_layout();fig.savefig(out/'baseline_key_relative_three_class.png',dpi=170);fig.savefig(out/'baseline_key_relative_three_class.pdf');plt.close(fig)
     with (out/'baseline_curves.csv').open('w',newline='') as f:w=csv.DictWriter(f,fieldnames=list(rows[0]));w.writeheader();w.writerows(rows)
-    hashes={str(p.relative_to(ROOT)):sha(p) for p in inputs}
+    hashes={str(relative_path(p)):sha(p) for p in inputs}
     dump(out/'audit.json',dict(status='AWAITING_AUGMENTATION_DEFINITION',created_at=datetime.datetime.now().astimezone().isoformat(),current_gaussian_augmentation=False,current_sigma=8,group='original_align',input='deform',head='gru',seed=42,existing_baseline_reusable=True,no_new_training=True,reason='Current Gaussian code uses dense sequences with no step augmentation. Historical sampling step and Key jitter are different methods; need explicit definition and values for new augmented arm.',input_hashes=hashes))
     lines=['# Step augmentation ablation：当前设置核对','', '当前Gaussian实验无step augmentation：protocol.loss及dataset_manifest.loss均明确记录no augmentation；gaussian_online.py直接遍历完整interaction，batch()按原positions/key_index生成soft target，没有step、stride、Key jitter或输入位移分支。历史Key-window实验有采样间隔及Key jitter，但不属于当前Gaussian baseline。','', '固定original_align / Deform GRU / σ=8 / seed42，原rollout split与已有最佳epoch15不变。当前已有结果可直接作为“不增强”组；这里仅整理原结果和三类概率曲线，不重复训练，也不将不存在的augmentation伪装成第二组。新增组的step定义及取值待确认，不能计算两组差异或触发补seed规则。','', '| split | BA % | Macro F1 % | Failure precision % | Failure recall % | Failure FPR % |','|---|---:|---:|---:|---:|---:|']
     for split,key in (('val','validation'),('test','test')):
         m=metrics[key];vals=[m['balanced_accuracy'],m['macro_f1'],m['per_class']['failure']['precision'],m['per_class']['failure']['recall'],m['failure_false_positive_rate']];lines.append('| '+split+' | '+' | '.join(f'{100*v:.2f}' for v in vals)+' |')
     lines+=['','## 所有val/test interaction的三类曲线','', '每个GT outcome下画P(in_progress)、P(success)、P(failure)，不是只挑一个interaction。Key按相机帧对齐，秒=(lastframe−Key)/30，重复相机帧先平均，每条interaction等权，缺失不补值，mean±interaction SD。这里只使用seed42，不是五seed平均；N与均值在baseline_curves.csv。Validation复用先前CPU回放概率，test为原保存GPU概率；上表为原GPU评估指标。','', '![三类baseline曲线](baseline_key_relative_three_class.png)','', '[原指标](baseline_metrics.json) · [曲线数据及N](baseline_curves.csv) · [配置审计](audit.json)','']
-    (out/'README.md').write_text('\n'.join(lines));assert all(sha(ROOT/p)==h for p,h in hashes.items());print('AUDIT_COMPLETE',out,flush=True)
+    (out/'README.md').write_text('\n'.join(lines));assert all(sha(project_path(p))==h for p,h in hashes.items());print('AUDIT_COMPLETE',out,flush=True)
 
 if __name__=='__main__':main()

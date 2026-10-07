@@ -1,6 +1,6 @@
 "use strict";
 
-var LABEL_KEYS = [6, 7, 8, 9];
+var LABEL_KEYS = [1, 2, 3, 4];
 var TACTILE_FINGERS = ["thumb", "index", "middle", "ring", "pinky"];
 var state = {
   view: "annotate",
@@ -466,7 +466,7 @@ function eventOptions(selected) {
 function normalizeLocalEvents() {
   state.events.forEach(function (event, index) {
     event.event_index = index;
-    event.event_key = LABEL_KEYS.indexOf(Number(event.event_key)) >= 0 ? Number(event.event_key) : 6;
+    event.event_key = LABEL_KEYS.indexOf(Number(event.event_key)) >= 0 ? Number(event.event_key) : 1;
     event.start_frame = clampFrame(event.start_frame);
     event.end_frame = clampFrame(event.end_frame);
     if (event.end_frame < event.start_frame) event.end_frame = event.start_frame;
@@ -503,7 +503,7 @@ function renderIntervals() {
   });
 }
 function addInterval(key) {
-  state.events.push({ event_key: Number(key) || 6, start_frame: state.currentFrame, end_frame: state.currentFrame, notes: "" });
+  state.events.push({ event_key: Number(key) || 1, start_frame: state.currentFrame, end_frame: state.currentFrame, notes: "" });
   state.activeEvent = state.events.length - 1; markDirty(); renderIntervals(); renderAnnotateTimeline();
 }
 function setActiveEventType(key) {
@@ -757,7 +757,7 @@ function bindEvents() {
   byId("annotatePrevious").addEventListener("click", function () { navigateRollout(-1); }); byId("annotateNext").addEventListener("click", function () { navigateRollout(1); });
   byId("annotateCamera").addEventListener("change", function () { state.tactileSeries = null; state.tactileSeriesKey = ""; state.tactileSeriesPromise = null; state.tactileAppliedKey = ""; state.tactilePendingFrame = null; state.tactileGeneration += 1; loadAnnotateVideo(); seekFrame(0); }); byId("annotatePlay").addEventListener("click", togglePlay); byId("annotateStepBack").addEventListener("click", function () { seekFrame(state.currentFrame - 1); }); byId("annotateStepForward").addEventListener("click", function () { seekFrame(state.currentFrame + 1); }); byId("annotateFrameSlider").addEventListener("input", function (event) { seekFrame(event.target.value); });
   byId("annotateVideo").addEventListener("play", function () { byId("annotatePlay").textContent = "Pause"; }); byId("annotateVideo").addEventListener("pause", function () { byId("annotatePlay").textContent = "Play"; }); byId("annotateVideo").addEventListener("timeupdate", function () { var record = selectedRollout(); if (record) updateFrameUi(Math.round(byId("annotateVideo").currentTime * (Number(record.fps) || 30)), false); });
-  byId("addInterval").addEventListener("click", function () { addInterval(6); }); byId("saveIntervals").addEventListener("click", saveIntervals);
+  byId("addInterval").addEventListener("click", function () { addInterval(1); }); byId("saveIntervals").addEventListener("click", saveIntervals);
   byId("resultsSource").addEventListener("change", loadResultsCurve); byId("resultsRollout").addEventListener("change", loadResultsCurve); byId("resultsCamera").addEventListener("change", function () { loadResultsVideo(); seekResultsFrame(0); }); byId("refreshResults").addEventListener("click", function () { loadResultsSources(true); }); byId("resultsPlay").addEventListener("click", toggleResultsPlay); byId("resultsStepBack").addEventListener("click", function () { seekResultsFrame(state.results.currentFrame - 1); }); byId("resultsStepForward").addEventListener("click", function () { seekResultsFrame(state.results.currentFrame + 1); }); byId("resultsFrameSlider").addEventListener("input", function (event) { seekResultsFrame(event.target.value); }); byId("resultsVideo").addEventListener("play", function () { byId("resultsPlay").textContent = "Pause"; }); byId("resultsVideo").addEventListener("pause", function () { byId("resultsPlay").textContent = "Play"; }); byId("resultsVideo").addEventListener("timeupdate", function () { var record = resultRollout(); if (record) updateResultsFrame(Math.round(byId("resultsVideo").currentTime * (Number(record.fps) || 30))); });
   byId("refreshRuns").addEventListener("click", loadRuns); byId("refreshAnalysis").addEventListener("click", loadAnalysis); byId("settingsForm").addEventListener("submit", saveSettings); byId("refreshDiagnostics").addEventListener("click", loadDiagnostics);
   window.addEventListener("beforeunload", function (event) { flushTelemetry(); if (state.dirty) { event.preventDefault(); event.returnValue = ""; } });
@@ -767,7 +767,7 @@ function bindEvents() {
     if (event.key === "ArrowLeft") { event.preventDefault(); seekFrame(state.currentFrame - 1); return; } if (event.key === "ArrowRight") { event.preventDefault(); seekFrame(state.currentFrame + 1); return; }
     if (event.key === "ArrowUp" && state.events.length) { event.preventDefault(); state.activeEvent = state.activeEvent == null ? 0 : Math.max(0,state.activeEvent-1); renderIntervals(); renderAnnotateTimeline(); return; }
     if (event.key === "ArrowDown" && state.events.length) { event.preventDefault(); state.activeEvent = state.activeEvent == null ? 0 : Math.min(state.events.length-1,state.activeEvent+1); renderIntervals(); renderAnnotateTimeline(); return; }
-    if (["1","2","3","4"].indexOf(event.key) >= 0) { event.preventDefault(); setActiveEventType(5 + Number(event.key)); return; } if (event.key.toLowerCase() === "q") { event.preventDefault(); setActiveBoundary("start"); return; } if (event.key.toLowerCase() === "w") { event.preventDefault(); setActiveBoundary("end"); }
+    if (["1","2","3","4"].indexOf(event.key) >= 0) { event.preventDefault(); setActiveEventType(Number(event.key)); return; } if (event.key.toLowerCase() === "q") { event.preventDefault(); setActiveBoundary("start"); return; } if (event.key.toLowerCase() === "w") { event.preventDefault(); setActiveBoundary("end"); }
   });
 }
 async function init() {

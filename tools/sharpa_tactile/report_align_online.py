@@ -1,4 +1,5 @@
 """Audit and publish the corrected online-window probe experiment."""
+from .common import project_path, relative_path
 import argparse
 import csv
 import json
@@ -21,8 +22,8 @@ def main():
     args=parser.parse_args(); output=args.output.resolve()
     manifest=json.loads((output/'run_manifest.json').read_text())
     results=json.loads((output/'results.json').read_text()); assert len(results)==60
-    dataset=ROOT/manifest['dataset']; dm=json.loads((dataset/'dataset_manifest.json').read_text())
-    assert all(sha(ROOT/path)==value for path,value in manifest['input_hashes'].items())
+    dataset=project_path(manifest['dataset']); dm=json.loads((dataset/'dataset_manifest.json').read_text())
+    assert all(sha(project_path(path))==value for path,value in manifest['input_hashes'].items())
     torch.set_num_threads(4)
     audited=[]; per_seed=[]; per_class=[]
     for result in results:
@@ -105,7 +106,7 @@ def main():
             ax.set_xticks(range(3),['Prog','Succ','Fail']); ax.set_yticks(range(3),['Prog','Succ','Fail']); ax.set_xlabel('Prediction'); ax.set_ylabel('GT'); ax.set_title(result['input']+' '+result['head'],fontsize=9)
     fig.suptitle('Seed 42; top=symmetric, bottom=asymmetric+merged'); fig.tight_layout(); fig.savefig(output/'confusion_seed42.png',dpi=160); plt.close(fig)
     normalized_confusions(output,results)
-    lines=['# 修正规则后的在线窗口三分类：训练与测试','',f'数据集：`{manifest["dataset"]}`；实验：`{output.relative_to(ROOT)}`。共 2 组 × 3 输入 × 2 模型 × 5 seeds（42–46）=60 次训练。','',
+    lines=['# 修正规则后的在线窗口三分类：训练与测试','',f'数据集：`{manifest["dataset"]}`；实验：`{relative_path(output)}`。共 2 组 × 3 输入 × 2 模型 × 5 seeds（42–46）=60 次训练。','',
     '## GT 如何生成','',
     '每个样本输入 16 个时刻的冻结特征，所有输入限制在 rollout 最早任意标注 start 到最后任意标注 end 内。参考采样 n=5、step=3；训练 success/failure 使用已保存的 n/step 增强与去重样本。GT 直接读取 ready NPZ 中的 labels，训练时不重新移动 Key，也不使用 Gaussian。只扫描窗口后 8 个实际采样点，从 last frame 向前寻找最近的 Key：success=1、failure=2；没有 Key 命中为 in_progress=0。前 8 点不参与 GT 判定，但作为模型历史输入。末帧已离开 Key 时仍按后半窗口最近命中定类。','',
     '基础组（symmetric_separate）：Align 6 为 failure、Align 8 为 success，Key=[end−n,end+n]。新增组（asymmetric_merged_success）为一个联合对照：同 rollout 同时有 Align failure/success 时，按最早 start 到最晚 end 连间隙合并，outcome=success，只保留最终 success Key；Key=[end−n,对应 insert start+n]，无后续 Insert 则上限回退 end+n。Insert 不独立预测。','',
@@ -138,27 +139,27 @@ def main():
     '## 产物和复现','',
     '`summary.csv`：12 组汇总；`per_seed.csv`：60 次指标；`per_class.csv`：每类 precision/recall/F1/support；`paired_seed_differences.json`：Fusion 对单模态配对 seed 差异。`runs/<group>/seed_<seed>/<input>_<head>/` 包含 best.pt、history.json、metrics.json、test_predictions.npz/CSV。CSV 每行包含 rollout、采样帧/ticks、n/step、GT、预测和三类概率；NPZ 另保留完整输入索引。','',
     '全部 60 次测试概率重新计算指标，逐项核对固定 ready GT 和输入；12 个 seed 42 checkpoints 在 CPU 重放，6 个 GRU 验证未来输入变化不会改变之前的 logits。数据集、encoder 权重与训练代码哈希在 run_manifest.json 中，训练前后保持不变。','',
-    '```bash',f'CUBLAS_WORKSPACE_CONFIG=:4096:8 bash tools/run_sharpa_tactile_ablation.sh train_align_online --dataset {manifest["dataset"]} --output outputs/sharpa_align_online_training/<new_timestamp> --device cuda:0',f'bash tools/run_sharpa_tactile_ablation.sh report_align_online --output {output.relative_to(ROOT)}','```','',
+    '```bash',f'CUBLAS_WORKSPACE_CONFIG=:4096:8 bash tools/run_sharpa_tactile_ablation.sh train_align_online --dataset {manifest["dataset"]} --output outputs/sharpa_align_online_training/<new_timestamp> --device cuda:0',f'bash tools/run_sharpa_tactile_ablation.sh report_align_online --output {relative_path(output)}','```','',
     f'日志：`logs/sharpa_align_online_training_{output.name}.log`；环境：`repos/ProcVLM/.venv`；代码快照见 code_snapshot/。数据生成目录的 training_started=false 记录生成阶段，本轮训练另存此目录。']
     (output/'README.md').write_text('\n'.join(lines)+'\n')
     dump(output/'verification.json',dict(status='PASS',runs=60,metrics_recomputed=True,ready_arrays_unchanged=True,input_hashes_unchanged=True,cpu_checkpoint_replays=audited,causal_gru_checks=6,rollout_split_isolation=True,selection_checked=True))
-    target=ROOT/'WeeklySummary/10.5/align_online_training'; target.mkdir(parents=True,exist_ok=False)
+    target=project_path('WeeklySummary/10.5/align_online_training'); target.mkdir(parents=True,exist_ok=False)
     names=['README.md','summary.csv','per_seed.csv','per_class.csv','paired_seed_differences.json','comparison.png','confusion_seed42.png','confusion_seed42_normalized.png','confusion_normalized.json','run_manifest.json','verification.json']
     copies=[]
     shutil.copy2(Path(__file__),output/'code_snapshot'/Path(__file__).name)
     for name in names:
         shutil.copy2(output/name,target/name); assert sha(output/name)==sha(target/name)
-        copies.append(dict(source=str((output/name).relative_to(ROOT)),destination=str((target/name).relative_to(ROOT)),sha256=sha(output/name)))
+        copies.append(dict(source=str(relative_path(output/name)),destination=str(relative_path(target/name)),sha256=sha(output/name)))
     for result in results:
         relative=Path('runs')/result['group']/f'seed_{result["seed"]}'/(result['input']+'_'+result['head'])
         dest=target/relative; dest.mkdir(parents=True)
         for name in ('metrics.json','history.json','test_predictions.csv'):
             shutil.copy2(output/relative/name,dest/name)
             assert sha(output/relative/name)==sha(dest/name)
-            copies.append(dict(source=str((output/relative/name).relative_to(ROOT)),destination=str((dest/name).relative_to(ROOT)),sha256=sha(dest/name)))
+            copies.append(dict(source=str(relative_path(output/relative/name)),destination=str(relative_path(dest/name)),sha256=sha(dest/name)))
     dump(target/'copy_manifest.json',copies)
-    (target/'SOURCE_INDEX.md').write_text(f'# 原始产物索引\n\n训练目录：`{output.relative_to(ROOT)}`\n\n数据目录：`{manifest["dataset"]}`\n\n权重与完整预测 NPZ 保留在训练目录 runs/。WeeklySummary 复制报告、指标、history 和 CSV，不复制权重与特征。\n')
-    weekly=ROOT/'WeeklySummary/10.5/10.5.md'; text=weekly.read_text()
+    (target/'SOURCE_INDEX.md').write_text(f'# 原始产物索引\n\n训练目录：`{relative_path(output)}`\n\n数据目录：`{manifest["dataset"]}`\n\n权重与完整预测 NPZ 保留在训练目录 runs/。WeeklySummary 复制报告、指标、history 和 CSV，不复制权重与特征。\n')
+    weekly=project_path('WeeklySummary/10.5/10.5.md'); text=weekly.read_text()
     text=text.replace('## 实验 6：修正规则后的在线三分类数据集（仅生成，未训练）','## 实验 6：修正规则后的在线三分类数据集')
     text=text.replace('**本次只生成数据和统计分布，不启动训练。**','生成阶段仅准备数据；后续训练结果见实验 7。')
     text=text.replace('- 实验 6：仅生成修正后的三分类数据集；没有训练指标，不能把实验 5 的分数当作其结果。','- 实验 6：修正后的三分类数据集；实验 7 使用这些数据训练，不能把实验 5 的分数当作其结果。')

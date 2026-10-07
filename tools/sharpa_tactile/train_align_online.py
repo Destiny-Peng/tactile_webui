@@ -1,4 +1,5 @@
 """Train on immutable prepared online-window labels, without relabelling."""
+from .common import project_path, relative_path
 import argparse
 import csv
 import json
@@ -35,7 +36,7 @@ def main():
     rollouts = manifest['rollouts']
     arrays = {'f6': [], 'deform': []}; hashes = {}
     def record(path):
-        hashes[str(path.relative_to(ROOT))] = sha(path)
+        hashes[str(relative_path(path))] = sha(path)
     record(args.dataset/'dataset_manifest.json')
     offset = 0
     for row in rollouts:
@@ -50,11 +51,11 @@ def main():
     tables = {key: torch.from_numpy(value).to(args.device) for key, value in banks.items()}
     for path, expected in manifest['source_hashes'].items():
         if path.startswith('checkpoints/'):
-            assert sha(ROOT/path) == expected
+            assert sha(project_path(path)) == expected
             hashes[path] = expected
     record(Path(__file__))
-    record(ROOT/'tools/sharpa_tactile/align_windows.py')
-    record(ROOT/'tools/sharpa_tactile/models.py')
+    record(project_path('tools/sharpa_tactile/align_windows.py'))
+    record(project_path('tools/sharpa_tactile/models.py'))
     results = []; started = time.monotonic()
     for group in GROUPS:
         dataset = {}
@@ -101,7 +102,7 @@ def main():
                         history.append(dict(epoch=epoch,train_loss=total/len(order),val_balanced_accuracy=val['balanced_accuracy'],val_macro_f1=val['macro_f1']))
                         if val['balanced_accuracy']>best+1e-8:
                             best = val['balanced_accuracy']; best_epoch = epoch
-                            torch.save(dict(model_class='AlignWindowProbe',model_config=config,state_dict={k:v.detach().cpu().clone() for k,v in model.state_dict().items()},class_mapping={0:'in_progress',1:'success',2:'failure'},output_unit='align_window',group=group,seed=seed,best_epoch=epoch,training_class_counts=counts.tolist(),training_class_weights=weights.tolist(),dataset_manifest_sha256=hashes[str((args.dataset/'dataset_manifest.json').relative_to(ROOT))],split_sha256=manifest['split_sha256']),directory/'best.pt')
+                            torch.save(dict(model_class='AlignWindowProbe',model_config=config,state_dict={k:v.detach().cpu().clone() for k,v in model.state_dict().items()},class_mapping={0:'in_progress',1:'success',2:'failure'},output_unit='align_window',group=group,seed=seed,best_epoch=epoch,training_class_counts=counts.tolist(),training_class_weights=weights.tolist(),dataset_manifest_sha256=hashes[str(relative_path(args.dataset/'dataset_manifest.json'))],split_sha256=manifest['split_sha256']),directory/'best.pt')
                         if epoch-best_epoch>=args.patience:
                             break
                     checkpoint = torch.load(directory/'best.pt',weights_only=True,map_location=args.device)
@@ -122,11 +123,11 @@ def main():
                     dump(args.output/'results.json',results)
                     print(f'{len(results)}/60 {group} {seed} {kind} {head}: BA={test["balanced_accuracy"]:.4f} F1={test["macro_f1"]:.4f} epoch={best_epoch} elapsed={time.monotonic()-started:.0f}s',flush=True)
                     del model,optimizer
-    assert all(sha(ROOT/path)==value for path,value in hashes.items())
+    assert all(sha(project_path(path))==value for path,value in hashes.items())
     snapshot=args.output/'code_snapshot'; snapshot.mkdir()
     for name in ('train_align_online.py','align_windows.py','models.py'):
-        shutil.copy2(ROOT/'tools/sharpa_tactile'/name,snapshot/name)
-    dump(args.output/'run_manifest.json',dict(status='complete',dataset=str(args.dataset.relative_to(ROOT)),device=args.device,seeds=list(range(42,47)),groups=list(GROUPS),epochs=args.epochs,patience=args.patience,batch_size=128,learning_rate=.001,weight_decay=.0001,hidden=128,layers=1,selection='maximum validation balanced accuracy; first tie',loss='inverse-frequency weighted cross entropy normalized to mean 1',frozen_encoders=True,labels='saved ready NPZ labels unchanged',input_hashes=hashes,split_sha256=manifest['split_sha256'],git_commit=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),torch_version=str(torch.__version__),elapsed_seconds=time.monotonic()-started))
+        shutil.copy2(project_path('tools/sharpa_tactile', name),snapshot/name)
+    dump(args.output/'run_manifest.json',dict(status='complete',dataset=str(relative_path(args.dataset)),device=args.device,seeds=list(range(42,47)),groups=list(GROUPS),epochs=args.epochs,patience=args.patience,batch_size=128,learning_rate=.001,weight_decay=.0001,hidden=128,layers=1,selection='maximum validation balanced accuracy; first tie',loss='inverse-frequency weighted cross entropy normalized to mean 1',frozen_encoders=True,labels='saved ready NPZ labels unchanged',input_hashes=hashes,split_sha256=manifest['split_sha256'],git_commit=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),torch_version=str(torch.__version__),elapsed_seconds=time.monotonic()-started))
     dump(args.output/'verification.json',dict(status='PASS',runs=len(results),input_hashes_unchanged=True,rollout_split_isolation=True,saved_labels_unchanged=True,metrics_recomputed=True,selection_checked=True))
 
 if __name__ == '__main__':

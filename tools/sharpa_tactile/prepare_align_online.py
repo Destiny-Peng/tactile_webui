@@ -1,4 +1,6 @@
 """Dataset-only revision: posterior-half Key bands and merged-success control."""
+from .common import project_path, relative_path
+from .common import canonical_key, is_stage
 import argparse
 import csv
 import datetime
@@ -19,20 +21,20 @@ HALF=8
 
 
 def units_for(events, group):
-    aligns=sorted([e for e in events if e['event_key'] in (6,8)],key=lambda e:(e['end_frame'],e['event_index']))
-    if group==GROUPS[1] and {e['event_key'] for e in aligns}=={6,8}:
-        assert aligns[-1]['event_key']==8, 'User assumes a mixed rollout ends in Align success'
+    aligns=sorted([e for e in events if is_stage(e, 'align')],key=lambda e:(e['end_frame'],e['event_index']))
+    if group==GROUPS[1] and {e['event_key'] for e in aligns}=={1,2}:
+        assert canonical_key(aligns[-1])==1, 'User assumes a mixed rollout ends in Align success'
         last=aligns[-1]
         return [dict(start_frame=min(e['start_frame'] for e in aligns),end_frame=max(e['end_frame'] for e in aligns),
             outcome=1,event_index=last['event_index'],merged=True,member_indices=[e['event_index'] for e in aligns])]
-    return [dict(start_frame=e['start_frame'],end_frame=e['end_frame'],outcome=1 if e['event_key']==8 else 2,
+    return [dict(start_frame=e['start_frame'],end_frame=e['end_frame'],outcome=canonical_key(e),
         event_index=e['event_index'],merged=False,member_indices=[e['event_index']]) for e in aligns]
 
 
 def regions_for(row,group,n):
     result=[]
     for unit in units_for(row['events'],group):
-        following=[e for e in row['events'] if e['event_key'] in (7,9) and e['event_index']>unit['event_index']]
+        following=[e for e in row['events'] if is_stage(e, 'insert') and e['event_index']>unit['event_index']]
         insert=min(following,key=lambda e:e['event_index']) if following else None
         upper=insert['start_frame']+n if group==GROUPS[1] and insert else unit['end_frame']+n
         result.append(dict(**unit,key_start=max(row['annotation_start'],unit['end_frame']-n),
@@ -155,11 +157,11 @@ def verify(output,manifest,case_summaries,balanced):
                 assert int(a['labels'][i])==slow_label(a['frames'][i].tolist(),regions_for(row,group,int(a['n'][i])))
         for row in rows:
             units=units_for(row['events'],group)
-            if group==GROUPS[1] and {e['event_key'] for e in row['events'] if e['event_key'] in (6,8)}=={6,8}:
+            if group==GROUPS[1] and {e['event_key'] for e in row['events'] if is_stage(e, 'align')}=={1,2}:
                 assert len(units)==1 and units[0]['outcome']==1 and units[0]['merged']
-                assert units[0]['start_frame']==min(e['start_frame'] for e in row['events'] if e['event_key'] in (6,8))
-                assert units[0]['end_frame']==max(e['end_frame'] for e in row['events'] if e['event_key'] in (6,8))
-    for path,digest in manifest['source_hashes'].items():assert sha(ROOT/path)==digest
+                assert units[0]['start_frame']==min(e['start_frame'] for e in row['events'] if is_stage(e, 'align'))
+                assert units[0]['end_frame']==max(e['end_frame'] for e in row['events'] if is_stage(e, 'align'))
+    for path,digest in manifest['source_hashes'].items():assert sha(project_path(path))==digest
     assert sha(output/'split_manifest.json')==manifest['split_sha256']
     assert not list(output.rglob('best.pt')) and not list(output.rglob('history.json'))
     report=dict(status='PASS',checked_grid_windows=checked,groups=2,parameter_cases=len(case_summaries),
@@ -177,8 +179,8 @@ def write_reports(output,manifest,case_summaries,balanced,verification):
         '| 组别 | Key 区域 | Align 处理 |','|---|---|',
         '| symmetric_separate | [align end−n, align end+n] | 保留原 Align failure/success 区间和类别 |',
         '| asymmetric_merged_success | [align end−n, 对应 insert start+n] | 同一 rollout 同时有 failure/success 时，从最早 Align start 到最晚 Align end 合并为连续 success interval，空隙纳入；不保留其中早期 failure Key |','',
-        '非对称 Key 与合并 success 是同一组的联合改动。success-only/failure-only rollout 保留原类别；没有后续 Insert 时非对称上限退回 end+n（逐条记录 no_insert_fallback）。对应 Insert 按原标注 event 顺序取终态 Align 之后第一个 7/9。Insert 不作为独立分类目标，其起点用于 Key 上限，范围内传感器数据可作为窗口上下文。','',
-        '每个 rollout 从所有有效原标注（不限 6/8）的最早 start 到最晚 end 构造窗口，所有采样点在闭区间内。沿此范围连续滑动，Align 切换或标注间空隙不重置；基础组的“保留区间”指保留各个 Key 和 GT 来源，而非在标注边界截断输入。','',
+        '非对称 Key 与合并 success 是同一组的联合改动。success-only/failure-only rollout 保留原类别；没有后续 Insert 时非对称上限退回 end+n（逐条记录 no_insert_fallback）。对应 Insert 按原标注 event 顺序取终态 Align 之后第一个 Insert stage。Insert 不作为独立分类目标，其起点用于 Key 上限，范围内传感器数据可作为窗口上下文。','',
+        '每个 rollout 从所有有效原标注（不限 Align stage）的最早 start 到最晚 end 构造窗口，所有采样点在闭区间内。沿此范围连续滑动，Align 切换或标注间空隙不重置；基础组的“保留区间”指保留各个 Key 和 GT 来源，而非在标注边界截断输入。','',
         '## 采样与冻结特征','',
         f"候选网格 n={manifest['ns']}、step={manifest['steps']}，两组共 {len(case_summaries)} 个参数组合。终点滑动步长为 1 相机帧，采样点为 [e−15×step,…,e]。不足长度时重复当前有效段首帧；相机重复索引取该帧最后的有效同步 tick，目标采样帧缺失就丢弃该窗口，不用邻帧替代；真正 tactile tick 缺口会分段。",
         'F6 每个特征仍由冻结 encoder 的稠密 16 tactile ticks 生成；为保证整个输入范围不越过首个标注，起始 15 ticks 的 F6 特征重新以范围内首个有效 tick 左补齐编码。Deform 与其余 F6 特征复用已有 frozen cache。没有重建检查，没有 optimizer/backward 或模型训练。','',
@@ -206,40 +208,42 @@ def write_reports(output,manifest,case_summaries,balanced,verification):
         '- [dataset_manifest.json](dataset_manifest.json)：时间范围、原事件、merge provenance、Key 区域、特征路径/offset、原 split、源文件哈希。',
         '- [verification.json](verification.json)：实际帧命中、倒推规则、范围、合并、标签、平衡及无重复/未训练检查。','',
         '```bash','source ./project_env.sh',
-        f"bash tools/run_sharpa_tactile_ablation.sh prepare_align_online --source {manifest['source']} --backup {manifest['backup']} --output {output.relative_to(ROOT)} --device cpu --steps {' '.join(map(str,manifest['steps']))} --ns {' '.join(map(str,manifest['ns']))} --reference-step {manifest['reference_step']} --reference-n {manifest['reference_n']} --seed {manifest['seed']}",
+        f"bash tools/run_sharpa_tactile_ablation.sh prepare_align_online --source {manifest['source']} --backup {manifest['backup']} --output {relative_path(output)} --device cpu --steps {' '.join(map(str,manifest['steps']))} --ns {' '.join(map(str,manifest['ns']))} --reference-step {manifest['reference_step']} --reference-n {manifest['reference_n']} --seed {manifest['seed']}",
         '```','']
     (output/'README.md').write_text('\n'.join(lines))
 
 
 def prepare(args):
-    source=args.source.resolve();backup=args.backup.resolve();output=args.output.resolve()
+    source=args.source.resolve();backup=args.backup.resolve() if args.backup else project_path('annotations/tactile_canonical/v1');output=args.output.resolve()
     if output.exists():raise ValueError('Use a new output directory; never overwrite existing data')
     output.mkdir(parents=True);(output/'features').mkdir();(output/'annotations').mkdir()
     data=json.loads((source/'data_manifest.json').read_text());split=json.loads((source/'split_manifest.json').read_text())
-    backup_manifest=json.loads((backup/'backup_manifest.json').read_text());lookup={r['source_record']:r for r in backup_manifest['records']}
-    assert data['status']=='complete' and sha(ROOT/data['intervals'])==data['signature']['interval_sha256']
+
+    assert data['status']=='complete' and sha(project_path(data['intervals']))==data['signature']['interval_sha256']
     assert args.reference_n in args.ns and args.reference_step in args.steps
     assert min(args.steps)>0 and min(args.ns)>=0
     shutil.copyfile(source/'split_manifest.json',output/'split_manifest.json')
     ids=[rid for splitname in ('train','val','test')for rid in split[splitname]]
     membership={rid:s for s in ('train','val','test')for rid in split[s]}
-    source_hashes={str((source/'data_manifest.json').relative_to(ROOT)):sha(source/'data_manifest.json'),
-                   str((ROOT/data['intervals']).relative_to(ROOT)):sha(ROOT/data['intervals'])}
+    source_hashes={str(relative_path(source/'data_manifest.json')):sha(source/'data_manifest.json'),
+                   str(relative_path(project_path(data['intervals']))):sha(project_path(data['intervals']))}
     encoders=FrozenEncoders().to(args.device);assert all(not p.requires_grad for p in encoders.parameters())
     for modality,path in [('f6',encoders.f6_path),('deform',encoders.deform_path)]:
-        assert sha(path)==data['signature'][modality+'_sha256'];source_hashes[str(path.relative_to(ROOT))]=sha(path)
+        assert sha(path)==data['signature'][modality+'_sha256'];source_hashes[str(relative_path(path))]=sha(path)
     torch.set_num_threads(2);rows=[];banks={};offset=0;recomputed=0
     for rid in ids:
         events=[e for e in data['source_intervals']if e['rollout_id']==rid];source_record=events[0]['source_record']
-        annotation=backup/lookup[source_record]['backup_record'];assert sha(annotation)==lookup[source_record]['sha256']
-        source_hashes[str(annotation.relative_to(ROOT))]=sha(annotation);shutil.copy2(annotation,output/'annotations'/annotation.name)
-        raw=json.loads(annotation.read_text());all_events=raw.get('failure_events') or [raw]
-        bounds=[(int(e['causal_onset_frame']),int(e['observable_onset_frame']))for e in all_events if e.get('causal_onset_frame') is not None and e.get('observable_onset_frame') is not None]
+        annotation=Path(source_record)
+        if not annotation.is_absolute():annotation=project_path(annotation)
+        source_hashes[str(annotation.resolve())]=sha(annotation)
+        shutil.copy2(annotation,output/'annotations'/annotation.name)
+        raw=json.loads(annotation.read_text());all_events=raw['intervals']
+        bounds=[(e['start_frame'],e['end_frame']) for e in all_events if canonical_key(e) in (1,2)]
         start=min(s for s,e in bounds);end=max(e for s,e in bounds);record=data['records'][rid]
         for event in events:
             original=all_events[event['event_index']]
-            assert original['causal_onset_frame']==event['start_frame'] and original['observable_onset_frame']==event['end_frame']
-        feature_source=source/'features'/(rid+'.npz');source_hashes[str(feature_source.relative_to(ROOT))]=sha(feature_source)
+            assert original==event
+        feature_source=source/'features'/(rid+'.npz');source_hashes[str(relative_path(feature_source))]=sha(feature_source)
         with np.load(feature_source)as cached:
             selected=np.flatnonzero((cached['video_frames']>=start)&(cached['video_frames']<=end))
             assert len(selected)
@@ -260,13 +264,13 @@ def prepare(args):
         if any(u['merged']for u in row['units'][GROUPS[1]]):
             u=row['units'][GROUPS[1]][0];covered=set()
             for e in events:
-                if e['event_key']in(6,8):covered.update(range(e['start_frame'],e['end_frame']+1))
+                if is_stage(e, 'align'):covered.update(range(e['start_frame'],e['end_frame']+1))
             row['merge_gap_frames']=u['end_frame']-u['start_frame']+1-len(covered)
         rows.append(row);recomputed+=len(prefix)
         for step in args.steps:banks[(len(rows)-1,step)]=candidate_windows(cache,row,step)
         offset+=len(selected);print('ONLINE_DATA_FEATURES',len(rows),len(ids),rid,'prefix',len(prefix),flush=True)
     del encoders
-    manifest=dict(status='preparing',source=str(source.relative_to(ROOT)),backup=str(backup.relative_to(ROOT)),
+    manifest=dict(status='preparing',source=str(relative_path(source)),backup=str(relative_path(backup)),
         created_at=datetime.datetime.now().astimezone().isoformat(),steps=args.steps,ns=args.ns,
         reference_n=args.reference_n,reference_step=args.reference_step,seed=args.seed,
         class_mapping=list(CLASSES),window=16,posterior_indices=list(range(8,16)),
@@ -338,7 +342,7 @@ def prepare(args):
 
 def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--source',type=Path,required=True)
-    p.add_argument('--backup',type=Path,required=True);p.add_argument('--output',type=Path,required=True)
+    p.add_argument('--backup',type=Path,default=None,help='Optional legacy report-path metadata; canonical source records supply annotation data');p.add_argument('--output',type=Path,required=True)
     p.add_argument('--device',default='cpu');p.add_argument('--steps',nargs='+',type=int,default=[1,3,5,8,12])
     p.add_argument('--ns',nargs='+',type=int,default=[0,2,5,10]);p.add_argument('--reference-step',type=int,default=3)
     p.add_argument('--reference-n',type=int,default=5);p.add_argument('--seed',type=int,default=42)

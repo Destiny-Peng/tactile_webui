@@ -1,4 +1,5 @@
 """Reports for Align Key-window screening and validation-selected five-seed comparisons."""
+from .common import project_path, relative_path
 import argparse
 import csv
 import datetime
@@ -130,7 +131,7 @@ def reports(output):
     chosen_cell=next(g for g in grid if g['config']['id']==best); counts=chosen_cell['splits']['test']['class_counts']
     baseline=counts[0]/sum(counts)
     lines=['# Align Key-window 三分类：MLP / Causal GRU','',
-        '仅使用 Align event 6/8，排除 Insert event 7/9。每个固定 16 个采样点的滑窗输出一个类别，而非对完整 interval 输出一个成功/失败标签。','',
+        '仅使用 Align stage（provenance），排除 Insert stage（provenance）。每个固定 16 个采样点的滑窗输出一个类别，而非对完整 interval 输出一个成功/失败标签。','',
         '## Label → GT → loss → output','',
         '| 区域/条件 | GT |','|---|---:|','| 窗口不包含移动后的 Key | 0：in_progress |',
         '| 窗口包含 Key，Align event 8 | 1：success |','| 窗口包含 Key，Align event 6 | 2：failure |','',
@@ -175,11 +176,11 @@ def reports(output):
         '![5-seed comparison](comparison.png)','![Validation grid](validation_grid.png)','![Seed42 confusion matrices](confusion_matrices.png)','',
         '## 复现命令','',
         '```bash','source ./project_env.sh',
-        f"bash tools/run_sharpa_tactile_ablation.sh align_windows_data --source {manifest['signature']['source']} --interval-source {manifest['signature']['interval_source']} --output {output.relative_to(ROOT)}",
-        f"bash tools/run_sharpa_tactile_ablation.sh verify_align_windows --output {output.relative_to(ROOT)}",
-        f"bash tools/run_sharpa_tactile_ablation.sh align_windows --output {output.relative_to(ROOT)} --device cuda:1 --epochs 30 --patience 8 --batch-size 128 --repeat-top 3",
-        f"bash tools/run_sharpa_tactile_ablation.sh verify_align_windows --output {output.relative_to(ROOT)} --completed",
-        f"bash tools/run_sharpa_tactile_ablation.sh report_align_windows --output {output.relative_to(ROOT)}",'```',''])
+        f"bash tools/run_sharpa_tactile_ablation.sh align_windows_data --source {manifest['signature']['source']} --interval-source {manifest['signature']['interval_source']} --output {relative_path(output)}",
+        f"bash tools/run_sharpa_tactile_ablation.sh verify_align_windows --output {relative_path(output)}",
+        f"bash tools/run_sharpa_tactile_ablation.sh align_windows --output {relative_path(output)} --device cuda:1 --epochs 30 --patience 8 --batch-size 128 --repeat-top 3",
+        f"bash tools/run_sharpa_tactile_ablation.sh verify_align_windows --output {relative_path(output)} --completed",
+        f"bash tools/run_sharpa_tactile_ablation.sh report_align_windows --output {relative_path(output)}",'```',''])
     (output/'README.md').write_text('\n'.join(lines))
     findings=['# Findings: Align Key windows','',f'Primary validation winner: `{best}`.','',
         'All model and configuration selection uses original-Key validation labels. Primary test banks are identical.','',
@@ -204,7 +205,7 @@ def reports(output):
     (output/'FINDINGS.md').write_text('\n'.join(findings))
     dump(output/'experiment_manifest.json',dict(status='complete',created_at=datetime.datetime.now().astimezone().isoformat(),
         experiment='align_key_window_3class_mlp_causal_gru',runs=len(results),source_signature=manifest['signature'],
-        verification=verification,code_sha256={str(p.relative_to(ROOT)):sha(p) for p in (ROOT/'tools/sharpa_tactile').glob('*.py')},
+        verification=verification,code_sha256={str(relative_path(p)):sha(p) for p in (project_path('tools/sharpa_tactile')).glob('*.py')},
         configs=len(grid),repeat_configs=status['repeat_configs'],unit='fixed 16-sample window',class_mapping=list(CLASSES),
         supplementary_live_annotation_audit=json.loads((output/'original_annotation_integrity.json').read_text())))
     print('ALIGN_REPORT_COMPLETE',len(results),best,flush=True)

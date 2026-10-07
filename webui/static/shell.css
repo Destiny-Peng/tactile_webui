@@ -18,10 +18,10 @@
   --radius-xl: 18px;
   --radius-lg: 14px;
   --radius-md: 10px;
-  --label-6: #dc6e6e;
-  --label-7: #d99032;
-  --label-8: #4f7df3;
-  --label-9: #2f9e6f;
+  --label-2: #dc6e6e;
+  --label-3: #d99032;
+  --label-4: #4f7df3;
+  --label-1: #2f9e6f;
   --curve-0: #7d8ba0;
   --curve-1: #4f7df3;
   --curve-2: #d96c6c;
@@ -185,10 +185,10 @@ input:focus, select:focus { outline: 0; border-color: rgba(79,125,243,.78); box-
 .timeline-lane-label { position: absolute; left: -34px; top: 50%; width: 26px; color: #617187; font: 750 .7rem/1 ui-monospace,monospace; text-align: right; transform: translateY(-50%); }
 .timeline-segment { position: absolute; top: 3px; bottom: 3px; min-width: 4px; border-radius: 4px; opacity: .74; cursor: pointer; box-shadow: inset 0 0 0 1px rgba(255,255,255,.45); }
 .timeline-segment:hover, .timeline-segment.active { opacity: 1; transform: translateY(-1px); box-shadow: 0 3px 10px rgba(31,42,55,.18),inset 0 0 0 1px rgba(255,255,255,.65); }
-.timeline-segment.label-6 { background: var(--label-6); }
-.timeline-segment.label-7 { background: var(--label-7); }
-.timeline-segment.label-8 { background: var(--label-8); }
-.timeline-segment.label-9 { background: var(--label-9); }
+.timeline-segment.label-2 { background: var(--label-2); }
+.timeline-segment.label-3 { background: var(--label-3); }
+.timeline-segment.label-4 { background: var(--label-4); }
+.timeline-segment.label-1 { background: var(--label-1); }
 .timeline-segment > span { position: absolute; left: 5px; top: 50%; color: #fff; font: 750 .58rem/1 ui-monospace,monospace; text-shadow: 0 1px 2px rgba(0,0,0,.25); transform: translateY(-50%); pointer-events: none; }
 .timeline-playhead { position: absolute; z-index: 9; top: 0; bottom: 0; width: 2px; background: #265ee8; box-shadow: 0 0 0 1px rgba(255,255,255,.55),0 0 10px rgba(38,94,232,.32); pointer-events: none; }
 .timeline-playhead::before { content: ""; position: absolute; top: -6px; left: -4px; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 0; border-bottom: 7px solid #265ee8; }

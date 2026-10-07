@@ -1,4 +1,5 @@
 """Report one binary prediction per interval across six probes and repeated seeds."""
+from .common import project_path, relative_path
 import argparse
 import csv
 import datetime
@@ -22,10 +23,10 @@ def main():
     if manifest['signature']['f6_context']=='interval_only':
         raw_check=json.loads((out/'raw_interval_prefix_check.json').read_text())
         assert raw_check['status']=='PASS'
-    source=ROOT/manifest['signature']['source']
+    source=project_path(manifest['signature']['source'])
     assert sha(out/'split_manifest.json')==sha(source/'split_manifest.json')==manifest['signature']['split_sha256']
     for kind,filename in [('f6','f6_tactile_vqvae.pt'),('deform','sharpa_wave_deform_encoder.pth')]:
-        assert sha(ROOT/'checkpoints/T-Rex/encoders'/filename)==manifest['signature'][kind+'_sha256']
+        assert sha(project_path('checkpoints/T-Rex/encoders', filename))==manifest['signature'][kind+'_sha256']
     rows=[]
     for r in results:
         cm=np.asarray(r['test']['confusion_matrix_success_failure'])
@@ -80,7 +81,7 @@ def main():
     split=json.loads((out/'split_manifest.json').read_text())
     for name in ('train','val','test'):
         c=manifest['split_counts'][name]; counts.append(f"| {name} | {len(split[name])} | {c['success']} | {c['failure']} | {c['intervals']} |")
-    rel=out.relative_to(ROOT)
+    rel=relative_path(out)
     context='严格仅用 interval 内数据；首个有效 tick 重复左侧补齐至 16。原缓存 F6 起点后的不足 16-tick 前缀重新编码，其余窗口已全部在 interval 内。' if manifest['signature']['f6_context']=='interval_only' else 'F6 使用当前及之前 15 个 rollout ticks，允许区间开始前的历史输入；这些历史输入没有单独标签或 loss。'
     readme=f'''# Interval-level tactile binary classification
 
@@ -88,7 +89,7 @@ def main():
 
 ## Samples and split
 
-Event 6/7 → failure=1；8/9 → success=0。`[causal,observable]` 两字段仅表示 closed interval start/end，不作因果起点/可观察时间解释。各原始 event 保留为独立样本，不按类别合并相邻 interval。
+Annotation 2 → failure target=1；annotation 1 → success target=0。`[causal,observable]` 两字段仅表示 closed interval start/end，不作因果起点/可观察时间解释。各原始 event 保留为独立样本，不按类别合并相邻 interval。
 
 {chr(10).join(counts)}
 
@@ -154,8 +155,8 @@ with torch.inference_mode():
     dump(out/'experiment_manifest.json',{'status':'complete','created_at':datetime.datetime.now().astimezone().isoformat(),
         'output':str(rel),'unit':'interval','groups':len(results),'environment':'repos/ProcVLM/.venv',
         'project_commit':subprocess.check_output(['git','-C',str(ROOT),'rev-parse','HEAD'],text=True).strip(),
-        'trex_commit':subprocess.check_output(['git','-C',str(ROOT/'repos/T-Rex'),'rev-parse','HEAD'],text=True).strip(),
-        'signature':manifest['signature'],'source_file_sha256':{str(p.relative_to(ROOT)):sha(p) for p in sorted((ROOT/'tools/sharpa_tactile').glob('*.py'))}})
+        'trex_commit':subprocess.check_output(['git','-C',str(project_path('repos/T-Rex')),'rev-parse','HEAD'],text=True).strip(),
+        'signature':manifest['signature'],'source_file_sha256':{str(relative_path(p)):sha(p) for p in sorted((project_path('tools/sharpa_tactile')).glob('*.py'))}})
     print('INTERVAL_REPORT_COMPLETE',len(results),flush=True)
 
 

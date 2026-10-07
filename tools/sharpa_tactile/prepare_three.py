@@ -1,4 +1,5 @@
 """Cache complete rollouts with hard background/success/failure labels and unchanged splits."""
+from .common import project_path, relative_path
 from pathlib import Path
 import argparse
 import datetime
@@ -22,11 +23,11 @@ def main():
     out = args.output; out.mkdir(parents=True, exist_ok=True)
     (out/'features').mkdir(exist_ok=True); (out/'frame_labels').mkdir(exist_ok=True)
     old = json.loads((args.previous/'data_manifest.json').read_text())
-    intervals = ROOT/old['intervals']; manifest = ROOT/old['manifest']
+    intervals = project_path(old['intervals']); manifest = project_path(old['manifest'])
     assert sha(intervals) == old['signature']['interval_sha256']
     assert sha(manifest) == old['signature']['manifest_sha256']
     split = json.loads((args.previous/'split_manifest.json').read_text())
-    sources = load_sources(intervals, manifest)
+    sources = load_sources(intervals, manifest,label_keys=(1,2))
     ids = [rid for name in ('train','val','test') for rid in split[name]]
     assert len(ids) == len(set(ids)) and set(ids) == set(sources)
     shutil.copyfile(args.previous/'split_manifest.json', out/'split_manifest.json')
@@ -36,10 +37,10 @@ def main():
     encoders = FrozenEncoders().to(args.device)
     assert sha(encoders.f6_path) == old['signature']['f6_sha256']
     assert sha(encoders.deform_path) == old['signature']['deform_sha256']
-    signature = {**old['signature'], 'class_mapping':{'0':'background','1':'success (8/9)','2':'failure (6/7)'},
+    signature = {**old['signature'], 'class_mapping':{'0':'background','1':'success (annotation 1)','2':'failure (annotation 2)'},
         'num_classes':3,'coverage':'complete usable rollouts, including post-interval suffix',
         'unlabelled':'background=0; no ignore or smoothing',
-        'previous_output':str(args.previous.relative_to(ROOT)),
+        'previous_output':str(relative_path(args.previous)),
         'split_sha256':sha(args.previous/'split_manifest.json')}
     signature.pop('binary', None)
     existing = out/'data_manifest.json'
@@ -50,10 +51,10 @@ def main():
     for i,(rid,(record,events)) in enumerate(sources.items()):
         # Audit source identities before reusing encoder features.
         src = old['signature']['episode_sources'][rid]
-        assert sha(ROOT/record['synchronized_frames_path']) == src['frames_sha256']
-        assert sha(ROOT/record['tactile_events_path']) == src['events_sha256']
+        assert sha(project_path(record['synchronized_frames_path'])) == src['frames_sha256']
+        assert sha(project_path(record['tactile_events_path'])) == src['events_sha256']
         for finger in FINGERS:
-            stat = (ROOT/record['tactile_stream_paths'][finger]['deform']).stat()
+            stat = (project_path(record['tactile_stream_paths'][finger]['deform'])).stat()
             assert stat.st_size == src['deform_streams'][finger]['size']
             assert stat.st_mtime_ns == src['deform_streams'][finger]['mtime_ns']
         arr = episode_arrays(record, events, signature['camera'], num_classes=3)
@@ -78,7 +79,7 @@ def main():
         assert np.isfinite(f6).all() and np.isfinite(deform).all()
         assert set(np.unique(arr['labels'])).issubset({0,1,2})
         temp = target.with_suffix('.tmp.npz')
-        np.savez_compressed(temp,f6=f6,deform=deform,labels=arr['labels'],video_frames=arr['video_frames'],
+        np.savez_compressed(temp,f6=f6,deform=deform,labels=arr['labels'],annotation_labels=arr['annotation_labels'],video_frames=arr['video_frames'],
                             ticks=arr['ticks'],segment_starts=arr['segment_starts'])
         temp.replace(target)
         print(f'CACHE {i+1}/{len(sources)} rows={len(ticks)} new={len(missing_positions)} seconds={time.monotonic()-started:.1f} {rid}',flush=True)

@@ -1,4 +1,5 @@
 """Diagnostic binary classification of each merged Align interval."""
+from .common import project_path, relative_path
 import argparse
 import csv
 import datetime
@@ -41,16 +42,16 @@ class MergedIntervalProbe(MergedProbe):
 def prepare(args):
     output=args.output;output.mkdir(parents=True,exist_ok=False)
     source=args.source;dm=json.loads((source/'dataset_manifest.json').read_text())
-    old=ROOT/dm['source'];oldm=json.loads((old/'dataset_manifest.json').read_text());original=ROOT/oldm['source']
+    old=project_path(dm['source']);oldm=json.loads((old/'dataset_manifest.json').read_text());original=project_path(oldm['source'])
     originalm=json.loads((original/'data_manifest.json').read_text())
     banks=load(source/'features.npz');meta=load(source/'windows.npz')
     encoder=FrozenEncoders().to(args.device);assert not any(p.requires_grad for p in encoder.parameters())
-    hashes={str(p.relative_to(ROOT)):sha(p) for p in (source/'dataset_manifest.json',source/'features.npz',source/'windows.npz',encoder.f6_path,encoder.deform_path,Path(__file__))}
-    assert all(sha(ROOT/p)==v for p,v in dm['input_hashes'].items())
+    hashes={str(relative_path(p)):sha(p) for p in (source/'dataset_manifest.json',source/'features.npz',source/'windows.npz',encoder.f6_path,encoder.deform_path,Path(__file__))}
+    assert all(sha(project_path(p))==v for p,v in dm['input_hashes'].items())
     rows=[];encoded_count=0;reused_count=0
     for ri,row in enumerate(dm['rollouts']):
         unit=row['merged_align'];start=unit['start_frame'];end=unit['end_frame']
-        cached_path=old/oldm['rollouts'][ri]['feature_path'];hashes[str(cached_path.relative_to(ROOT))]=sha(cached_path)
+        cached_path=old/oldm['rollouts'][ri]['feature_path'];hashes[str(relative_path(cached_path))]=sha(cached_path)
         cached=load(cached_path);selected=(cached['video_frames']>=start)&(cached['video_frames']<=end)
         cached={k:v[selected] for k,v in cached.items()};assert len(cached['ticks'])
         boundary=dict(row,annotation_start=start,annotation_end=end)
@@ -85,8 +86,8 @@ def prepare(args):
     import hashlib
     corpus_sha=hashlib.sha256(signature.encode()).hexdigest()
     dump(output/'group_equivalence.json',dict(groups=dm['groups'],interval_corpus_sha256={g:corpus_sha for g in dm['groups']},identical=True,reason='Both groups share merged intervals; only Key bands differ, which binary interval supervision does not use.',unique_training_runs=30))
-    dump(output/'interval_manifest.json',dict(status='complete',created_at=datetime.datetime.now().astimezone().isoformat(),source=str(source.relative_to(ROOT)),records=rows,class_mapping={'0':'success','1':'failure'},counts=counts,split_sha256=sha(source/'split_manifest.json'),input_hashes=hashes,source_groups=dm['groups'],groups_identical=True,feature_context='one exact16 raw F6 window encoded once + last-frame deform; interval-only edge padding; step3',reencoded_windows=encoded_count,reused_windows=reused_count,encoder_frozen=True))
-    assert all(sha(ROOT/p)==v for p,v in hashes.items())
+    dump(output/'interval_manifest.json',dict(status='complete',created_at=datetime.datetime.now().astimezone().isoformat(),source=str(relative_path(source)),records=rows,class_mapping={'0':'success','1':'failure'},counts=counts,split_sha256=sha(source/'split_manifest.json'),input_hashes=hashes,source_groups=dm['groups'],groups_identical=True,feature_context='one exact16 raw F6 window encoded once + last-frame deform; interval-only edge padding; step3',reencoded_windows=encoded_count,reused_windows=reused_count,encoder_frozen=True))
+    assert all(sha(project_path(p))==v for p,v in hashes.items())
     snapshot=output/'code_snapshot';snapshot.mkdir();shutil.copy2(Path(__file__),snapshot/Path(__file__).name)
     print('INTERVAL_DATA_COMPLETE',counts,'reused',reused_count,'reencoded',encoded_count,flush=True)
 
@@ -112,8 +113,8 @@ def evaluate(model,samples,device):
 def train(args):
     output=args.output;output.mkdir(parents=True,exist_ok=False)
     dm=json.loads((args.source/'interval_manifest.json').read_text());samples=read_samples(args.source,dm)
-    assert all(sha(ROOT/p)==v for p,v in dm['input_hashes'].items())
-    hashes={str(p.relative_to(ROOT)):sha(p) for p in [args.source/'interval_manifest.json',args.source/'group_equivalence.json',args.source/'split_manifest.json',Path(__file__)]+[args.source/r['feature_path'] for r in dm['records']]}
+    assert all(sha(project_path(p))==v for p,v in dm['input_hashes'].items())
+    hashes={str(relative_path(p)):sha(p) for p in [args.source/'interval_manifest.json',args.source/'group_equivalence.json',args.source/'split_manifest.json',Path(__file__)]+[args.source/r['feature_path'] for r in dm['records']]}
     norm=normalization(samples['train']);counts=np.bincount([r['label'] for r in samples['train']],minlength=2);weights=len(samples['train'])/(2*counts)
     results=[];started=time.monotonic()
     for seed in range(42,47):
@@ -153,9 +154,9 @@ def train(args):
                 results.append(result);dump(output/'results.json',results)
                 print('INTERVAL_TRAIN',len(results),30,seed,kind,head,'BA',test['balanced_accuracy'],'F1',test['macro_f1'],'epoch',best_epoch,'elapsed',round(time.monotonic()-started),flush=True)
                 del model,optimizer
-    assert all(sha(ROOT/p)==v for p,v in hashes.items())
+    assert all(sha(project_path(p))==v for p,v in hashes.items())
     snapshot=output/'code_snapshot';snapshot.mkdir();shutil.copy2(Path(__file__),snapshot/Path(__file__).name)
-    dump(output/'run_manifest.json',dict(status='complete',dataset=str(args.source.relative_to(ROOT)),source_groups=dm['source_groups'],groups_identical=True,unique_runs=30,seeds=list(range(42,47)),device=args.device,environment='repos/ProcVLM/.venv',torch_version=str(torch.__version__),git_commit=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),input_hashes=hashes,elapsed_seconds=time.monotonic()-started,loss='weighted CE; weights=N/(2*n_class_intervals)',selection='maximum validation interval BA, first tie, threshold .5',epochs=30,patience=8,batch_size=8,lr=.001,weight_decay=.0001,gradient_clip=1,hidden=128,gru_layers=1,encoder_frozen=True,split_sha256=dm['split_sha256']))
+    dump(output/'run_manifest.json',dict(status='complete',dataset=str(relative_path(args.source)),source_groups=dm['source_groups'],groups_identical=True,unique_runs=30,seeds=list(range(42,47)),device=args.device,environment='repos/ProcVLM/.venv',torch_version=str(torch.__version__),git_commit=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),input_hashes=hashes,elapsed_seconds=time.monotonic()-started,loss='weighted CE; weights=N/(2*n_class_intervals)',selection='maximum validation interval BA, first tie, threshold .5',epochs=30,patience=8,batch_size=8,lr=.001,weight_decay=.0001,gradient_clip=1,hidden=128,gru_layers=1,encoder_frozen=True,split_sha256=dm['split_sha256']))
 
 
 def main():

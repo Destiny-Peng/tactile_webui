@@ -1,4 +1,5 @@
 from __future__ import annotations
+from .common import project_path
 from collections import deque
 import numpy as np
 import torch
@@ -16,8 +17,8 @@ class FrozenEncoders(nn.Module):
         torch.backends.cudnn.allow_tf32 = False
         torch.backends.cuda.matmul.allow_tf32 = False
         torch.set_float32_matmul_precision('highest')
-        self.f6_path = f6_path or ROOT / 'checkpoints/T-Rex/encoders/f6_tactile_vqvae.pt'
-        self.deform_path = deform_path or ROOT / 'checkpoints/T-Rex/encoders/sharpa_wave_deform_encoder.pth'
+        self.f6_path = f6_path or project_path('checkpoints/T-Rex/encoders/f6_tactile_vqvae.pt')
+        self.deform_path = deform_path or project_path('checkpoints/T-Rex/encoders/sharpa_wave_deform_encoder.pth')
         blob = torch.load(self.f6_path, map_location='cpu', weights_only=True)
         self.vq = TactileVQVAE(TactileVQVAEConfig.from_dict(blob['config']))
         self.vq.load_state_dict(blob['model_state'], strict=True)

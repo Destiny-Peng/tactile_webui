@@ -1,4 +1,5 @@
 """Add GT-row-normalized confusion matrices to an existing probe report."""
+from .common import project_path, relative_path
 import argparse
 import json
 import shutil
@@ -59,14 +60,14 @@ def main():
 '''
     if '## 按 GT 行归一化的混淆矩阵' not in readme.read_text():
         readme.write_text(readme.read_text()+'\n'+addition)
-    target=ROOT/'WeeklySummary/10.5/align_online_training'
+    target=project_path('WeeklySummary/10.5/align_online_training')
     copies=json.loads((target/'copy_manifest.json').read_text())
     for name in ('README.md','confusion_normalized.json','confusion_seed42_normalized.png'):
         shutil.copy2(output/name,target/name)
-        entry=dict(source=str((output/name).relative_to(ROOT)),destination=str((target/name).relative_to(ROOT)),sha256=sha(output/name))
+        entry=dict(source=str(relative_path(output/name)),destination=str(relative_path(target/name)),sha256=sha(output/name))
         copies=[row for row in copies if row['destination']!=entry['destination']]; copies.append(entry)
     dump(target/'copy_manifest.json',copies)
-    weekly=ROOT/'WeeklySummary/10.5/10.5.md'; text=weekly.read_text()
+    weekly=project_path('WeeklySummary/10.5/10.5.md'); text=weekly.read_text()
     if 'align_online_training/confusion_seed42_normalized.png' not in text:
         marker='![修正数据集五 seed 结果](align_online_training/comparison.png)'
         assert marker in text
@@ -75,7 +76,7 @@ def main():
     snapshot=output/'code_snapshot'/Path(__file__).name
     shutil.copy2(Path(__file__),snapshot)
     for row in copies:
-        assert sha(ROOT/row['source'])==sha(ROOT/row['destination'])==row['sha256']
+        assert sha(project_path(row['source']))==sha(project_path(row['destination']))==row['sha256']
     dump(output/'normalization_verification.json',dict(status='PASS',runs=len(results),row_sums_checked=True,diagonal_matches_recall=True,copies_checked=len(copies),source_metrics_sha256=sha(output/'results.json'),code_sha256=sha(Path(__file__))))
     print(f'PASS: normalized {len(results)} matrices; plotted 12 seed-42 models; copied {len(copies)} files verified.')
 

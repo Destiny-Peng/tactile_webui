@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SOURCE_ROOT="${1:-/mnt/hdd/pyr/LF3R}"
+SOURCE_ROOT="${1:-}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TARGET_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+SOURCE_ROOT="${SOURCE_ROOT:-$(dirname "$TARGET_ROOT")/LF3R}"
 
 fail() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 note() { printf '[link] %s\n' "$*"; }

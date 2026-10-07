@@ -1,28 +1,32 @@
 from __future__ import annotations
+from .common import project_path
 from collections import defaultdict
 import json
 from pathlib import Path
 import numpy as np
-from .common import ROOT, FINGERS, read_jsonl, binary_timeline, three_class_timeline
+from .common import ROOT, FINGERS, read_jsonl, binary_timeline, three_class_timeline, annotation_timeline, canonical_key
 
 
-def load_sources(interval_path, manifest_path):
+def load_sources(interval_path, manifest_path, label_keys=(1, 2, 3, 4)):
+    from .canonical_annotations import validate_event
     events = read_jsonl(interval_path)
+    manifest = {r['id']: r for r in read_jsonl(manifest_path)}
     grouped = defaultdict(list)
     for event in events:
-        if int(event['event_key']) in (6, 7, 8, 9):
-            grouped[event['rollout_id']].append(event)
-    manifest = {r['id']: r for r in read_jsonl(manifest_path)}
-    missing = set(grouped) - manifest.keys()
-    if missing:
-        raise ValueError(f'Missing USB episodes: {sorted(missing)}')
-    return {rid: (manifest[rid], grouped[rid]) for rid in sorted(grouped)}
+        rid = event['rollout_id']
+        if rid not in manifest:
+            raise ValueError(f'Missing rollout: {rid}')
+        validate_event(event, manifest[rid])
+        grouped[rid].append(event)
+    # A binary task may select eligible rollouts, but keeps all annotation labels.
+    return {rid: (manifest[rid], grouped[rid]) for rid in sorted(grouped)
+            if any(canonical_key(e) in label_keys for e in grouped[rid])}
 
 
 def episode_arrays(record, intervals, camera='cam_high', num_classes=2):
     """Recorded tick/event join: never nearest-neighbor or future-fill tactile data."""
-    frames = read_jsonl(ROOT / record['synchronized_frames_path'])
-    event_rows = read_jsonl(ROOT / record['tactile_events_path'])
+    frames = read_jsonl(project_path(record['synchronized_frames_path']))
+    event_rows = read_jsonl(project_path(record['tactile_events_path']))
     events = {(r['finger'], int(r['event_id'])): r for r in event_rows}
     if num_classes == 3:
         labels = three_class_timeline(intervals, record['total_frames'])
@@ -75,6 +79,7 @@ def episode_arrays(record, intervals, camera='cam_high', num_classes=2):
     endpoints = np.flatnonzero(usable) if num_classes == 3 else np.flatnonzero(usable & (np.arange(n) <= supervised[-1]))
     gaps = np.r_[True, np.diff(endpoints) != 1]
     return {'f6': f6, 'valid': valid, 'endpoints': endpoints, 'labels': targets[endpoints],
+            'annotation_labels': annotation_timeline(intervals, record['total_frames'])[camera_frames[endpoints]],
             'video_frames': camera_frames[endpoints], 'ticks': endpoints,
             'segment_starts': gaps, 'references': references,
             'audit': {'sync_rows': n, 'valid_ticks': int(valid.sum()),
@@ -87,7 +92,7 @@ def episode_arrays(record, intervals, camera='cam_high', num_classes=2):
 
 class DeformStreams:
     def __init__(self, record):
-        self.maps = [np.memmap(ROOT / record['tactile_stream_paths'][finger]['deform'],
+        self.maps = [np.memmap(project_path(record['tactile_stream_paths'][finger]['deform']),
                                mode='r', dtype=np.uint8) for finger in FINGERS]
 
     def batch(self, references):

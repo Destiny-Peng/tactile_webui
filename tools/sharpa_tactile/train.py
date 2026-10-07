@@ -1,4 +1,6 @@
 from __future__ import annotations
+from .common import relative_path
+from .common import binary_target, canonical_key
 import argparse
 import copy
 import csv
@@ -95,11 +97,11 @@ def interval_metrics(details, events, ids, threshold):
     for row in details:grouped[row['rollout_id']].append(row)
     targets=[];probabilities=[];rows=[]
     for e in events:
-        if e['rollout_id'] not in grouped:continue
+        if e['rollout_id'] not in grouped or canonical_key(e) not in (1,2):continue
         p=[r['failure_probability'] for r in grouped[e['rollout_id']]
            if e['start_frame']<=r['video_frame']<=e['end_frame']]
         if not p:continue
-        y=int(int(e['event_key']) in (6,7));average=float(np.mean(p))
+        y=binary_target(e);average=float(np.mean(p))
         targets.append(y);probabilities.append(average)
         rows.append({'rollout_id':e['rollout_id'],'event_index':e['event_index'],'event_key':e['event_key'],
                      'label':y,'failure_probability':average,'samples':len(p)})
@@ -160,7 +162,7 @@ def train_group(args, input_kind, head_kind, sequences, split, data):
             torch.save({'model_config':config,'state_dict':state,'best_epoch':best_epoch,
                 'selection':'validation balanced accuracy at threshold 0.5','seed':args.seed,
                 'encoder_sha256':{'f6':data['signature']['f6_sha256'],'deform':data['signature']['deform_sha256']},
-                'binary_mapping':{'0':'success (8/9)','1':'failure (6/7)'},
+                'binary_mapping':{'0':'success (annotation 1)','1':'failure (annotation 2)'},
                 'split_manifest':'split_manifest.json','normalization':'training supervised frames only; std floor 0.01',
                 'architecture':'frozen continuous F6 + frozen deform 2x2 pooling; trainable projections and probe'},directory/'best.pt')
         if epoch-best_epoch>=args.patience:break
@@ -213,7 +215,7 @@ def main():
     split=json.loads((args.output/'split_manifest.json').read_text())
     if args.seed!=split['seed']:raise ValueError('Training seed must match saved split seed')
     sequences={name:load_sequences(args.output,split[name]) for name in ('train','val','test')}
-    dump(args.output/'training_config.json',{**vars(args),'output':str(args.output.relative_to(ROOT)),
+    dump(args.output/'training_config.json',{**vars(args),'output':str(relative_path(args.output)),
          'created_at':datetime.datetime.now().astimezone().isoformat(),'groups':6,
          'class_balance':'weighted CE; weights fitted on training labels',
          'selection':'validation balanced accuracy; threshold calibrated on validation',

@@ -1,4 +1,5 @@
 """Six frozen three-class frame-wise probes; hard targets and argmax evaluation."""
+from .common import relative_path
 from pathlib import Path
 import argparse
 import csv
@@ -169,7 +170,7 @@ def main():
     assert data['signature']['num_classes'] == 3
     split = json.loads((args.output/'split_manifest.json').read_text())
     sequences = {name:load_sequences(args.output,split[name]) for name in ('train','val','test')}
-    dump(args.output/'training_config.json',{**vars(args),'output':str(args.output.relative_to(ROOT)),
+    dump(args.output/'training_config.json',{**vars(args),'output':str(relative_path(args.output)),
         'created_at':datetime.datetime.now().astimezone().isoformat(),'groups':6,'encoder_finetuning':False,
         'class_balance':args.weight_mode+' from train only','split_seed':split['seed'],'loss':'weighted CE, hard labels, no ignore, no smoothing',
         'padding':'length mask before CE; padding is not a data frame','selection':'validation macro recall, argmax',

@@ -15,8 +15,8 @@ def main():
     parser.add_argument('--output',type=Path,required=True)
     args=parser.parse_args();torch.set_num_threads(2);torch.manual_seed(7)
     results={}
-    events=[{'event_key':6,'start_frame':1,'end_frame':3},
-            {'event_key':8,'start_frame':3,'end_frame':5}]
+    events=[{'event_key':2,'start_frame':1,'end_frame':3},
+            {'event_key':1,'start_frame':3,'end_frame':5}]
     labels,conflict=binary_timeline(events,7)
     assert labels.tolist()==[-1,1,1,-1,0,0,-1] and conflict.sum()==1
     results['binary_mapping_conflict_and_background']='PASS'

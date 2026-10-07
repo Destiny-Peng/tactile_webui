@@ -1,4 +1,5 @@
 """Meaningful contracts for hard-label three-class data, padding and causal probes."""
+from .common import project_path
 import argparse
 import json
 from pathlib import Path
@@ -12,17 +13,17 @@ from .train_three import metrics, batch_data
 def main():
     parser = argparse.ArgumentParser(description=__doc__); parser.add_argument('--output',type=Path,required=True)
     args = parser.parse_args(); torch.set_num_threads(2); torch.manual_seed(7); results = {}
-    events = [{'event_key':6,'start_frame':1,'end_frame':2},{'event_key':7,'start_frame':2,'end_frame':3},
-              {'event_key':8,'start_frame':4,'end_frame':4},{'event_key':9,'start_frame':5,'end_frame':5}]
+    events = [{'event_key':2,'start_frame':1,'end_frame':2},{'event_key':2,'start_frame':2,'end_frame':3},
+              {'event_key':1,'start_frame':4,'end_frame':4},{'event_key':1,'start_frame':5,'end_frame':5}]
     assert three_class_timeline(events,7).tolist() == [0,2,2,2,1,1,0]
-    assert three_class_timeline([{'event_key':1,'start_frame':0,'end_frame':6}],7).tolist() == [0]*7
-    try: three_class_timeline(events+[{'event_key':8,'start_frame':3,'end_frame':4}],7)
+    assert three_class_timeline([{'event_key':3,'start_frame':0,'end_frame':6}],7).tolist() == [0]*7
+    try: three_class_timeline(events+[{'event_key':1,'start_frame':3,'end_frame':4}],7)
     except ValueError: pass
     else: raise AssertionError('Conflicting labels silently accepted')
     results['hard_labels_closed_intervals_background_no_ignore'] = 'PASS'
     data = json.loads((args.output/'data_manifest.json').read_text())
     from .common import ROOT
-    previous = ROOT/data['signature']['previous_output']
+    previous = project_path(data['signature']['previous_output'])
     assert sha(args.output/'split_manifest.json') == sha(previous/'split_manifest.json')
     split = json.loads((args.output/'split_manifest.json').read_text())
     groups = [set(split[n]) for n in ('train','val','test')]

@@ -104,6 +104,39 @@ class TactileServiceTest(unittest.TestCase):
                     release.set()
                 self.assertEqual(first.result(timeout=5)['matched_video_frame'], 8)
 
+    def test_episode_and_series_caches_are_bounded_lru(self):
+        service = FailRecoveryTactileService(
+            self.root,
+            episode_cache_limit=1,
+            series_cache_limit=1,
+        )
+
+        service.series('first', 'cam_high')
+        first_stats = service.cache_stats()
+        self.assertEqual(first_stats['episodes']['rollouts'], ['first'])
+        self.assertEqual(first_stats['series']['keys'], [
+            {'rollout_id': 'first', 'camera': 'cam_high'}
+        ])
+
+        service.series('second', 'cam_high')
+        second_stats = service.cache_stats()
+        self.assertEqual(second_stats['episodes']['rollouts'], ['second'])
+        self.assertEqual(second_stats['series']['keys'], [
+            {'rollout_id': 'second', 'camera': 'cam_high'}
+        ])
+        self.assertEqual(second_stats['episodes']['evictions'], 1)
+        self.assertEqual(second_stats['series']['evictions'], 1)
+
+        # Revisiting an evicted rollout reloads it but memory stays bounded.
+        service.series('first', 'cam_high')
+        final_stats = service.cache_stats()
+        self.assertEqual(final_stats['episodes']['size'], 1)
+        self.assertEqual(final_stats['series']['size'], 1)
+        self.assertEqual(final_stats['episodes']['misses'], 3)
+        self.assertEqual(final_stats['series']['misses'], 3)
+        self.assertEqual(final_stats['episodes']['evictions'], 2)
+        self.assertEqual(final_stats['series']['evictions'], 2)
+
     def test_missing_or_corrupt_episode_does_not_break_startup_or_other_episodes(self):
         path = self.root / 'second/events.jsonl'
         path.write_text('{invalid json}\n')

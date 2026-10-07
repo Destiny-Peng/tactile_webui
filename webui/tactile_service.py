@@ -39,10 +39,10 @@ class FailRecoveryTactileService:
             / "failrecovery"
             / "manifest.jsonl"
         )).expanduser().resolve()
-        try:
-            self.manifest_path.relative_to(self.project_root)
-        except ValueError as exc:
-            raise ValueError("manifest path escapes source project root") from exc
+        # The manifest may itself be reached through a symlink from this
+        # standalone repository and therefore live outside project_root.
+        # Only payload paths read from the manifest are constrained to
+        # project_root by _project_file().
         self.episodes: dict[str, EpisodeTactile] = {}
         self._series_cache: dict[tuple[str, str], dict[str, Any]] = {}
         self._sprite_cache: OrderedDict[tuple[str, str, int, str], bytes] = OrderedDict()

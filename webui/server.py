@@ -109,6 +109,15 @@ class TactileApplication:
         if not manifest_path.is_file():
             return fallback
 
+        resolved_manifest = manifest_path.resolve()
+
+        # A symlink target under <project>/datasets/... carries an unambiguous
+        # project root in its own path. Prefer that deterministic mapping over
+        # probing a few manifest references. This is the normal LF3R layout.
+        for parent in resolved_manifest.parents:
+            if parent.name == "datasets":
+                return parent.parent.resolve()
+
         references: list[str] = []
         try:
             with manifest_path.open("r", encoding="utf-8") as handle:
@@ -149,7 +158,7 @@ class TactileApplication:
         if not relative_references:
             return fallback
 
-        candidates = [fallback, *manifest_path.resolve().parents]
+        candidates = [fallback, *resolved_manifest.parents]
         best_root = fallback
         best_score = -1
         seen: set[Path] = set()

@@ -135,6 +135,46 @@ class WorkspaceAnnotationTest(unittest.TestCase):
         self.assertEqual(app.annotation_seed_path(), seed.resolve())
         self.assertIn("usb_symlink", app.rollout_map())
 
+    def test_symlinked_manifest_uses_datasets_parent_even_without_probe_hits(self):
+        temporary, app = self.make_app()
+        self.addCleanup(temporary.cleanup)
+        external_temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(external_temporary.cleanup)
+        external = Path(external_temporary.name)
+
+        old_manifest = (
+            external
+            / "datasets/lf3r_failure_rollouts/v1/failrecovery_manifest.jsonl"
+        )
+        old_manifest.parent.mkdir(parents=True)
+        # Deliberately use a manifest row whose referenced payload is absent.
+        # Root inference must come from the resolved manifest location, not
+        # from successful existence probes.
+        old_manifest.write_text(
+            json.dumps(
+                {
+                    "id": "usb_symlink_path_only",
+                    "task_key": "usb_insert",
+                    "camera_video_paths": {
+                        "cam_high": (
+                            "datasets/lf3r_failure_rollouts/v1/"
+                            "failrecovery/not_materialized/cam_high.mp4"
+                        )
+                    },
+                }
+            )
+            + "\n"
+        )
+
+        local_manifest = app.root / "datasets/failrecovery/manifest.jsonl"
+        local_manifest.unlink()
+        local_manifest.symlink_to(old_manifest)
+
+        app = TactileApplication(app.root)
+        self.assertEqual(app.manifest_path, old_manifest.resolve())
+        self.assertEqual(app.data_root, external.resolve())
+        self.assertTrue(app.tactile.has_rollout("usb_symlink_path_only"))
+
     def test_rejects_invalid_interval(self):
         temporary, app = self.make_app()
         self.addCleanup(temporary.cleanup)

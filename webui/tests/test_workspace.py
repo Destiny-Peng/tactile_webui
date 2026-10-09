@@ -50,7 +50,7 @@ class WorkspaceAnnotationTest(unittest.TestCase):
         record = json.loads(app.annotation_record_path("usb_001").read_text())
         self.assertEqual([row["event_key"] for row in record["tactile_intervals"]], [1, 2, 3, 4])
 
-    def test_independent_labels_require_failure_and_keep_provenance(self):
+    def test_independent_labels_on_all_outcomes_keep_provenance(self):
         temporary, app = self.make_app()
         self.addCleanup(temporary.cleanup)
         events = [{"event_key": key, "start_frame": 10, "end_frame": 20,
@@ -58,9 +58,10 @@ class WorkspaceAnnotationTest(unittest.TestCase):
         saved = app.save_rollout_annotations("usb_001", events)
         self.assertEqual(len(saved), 3)
         self.assertTrue(all(event["provenance"] for event in saved))
-        app.rollout_map()["usb_001"]["ground_truth_outcome"] = "success"
-        with self.assertRaises(ValueError):
-            app.save_rollout_annotations("usb_001", events)
+        for outcome in ("success", "failure", "unknown", None):
+            app.rollout_map()["usb_001"]["ground_truth_outcome"] = outcome
+            saved = app.save_rollout_annotations("usb_001", events)
+            self.assertEqual({event["event_key"] for event in saved}, {2, 3, 4})
 
     def test_existing_lf3r_record_is_not_overwritten(self):
         temporary, app = self.make_app()

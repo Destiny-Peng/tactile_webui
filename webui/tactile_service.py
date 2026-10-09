@@ -9,6 +9,7 @@ import struct
 import threading
 import zlib
 from collections import OrderedDict
+from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -174,7 +175,7 @@ class FailRecoveryTactileService:
     def _load_sqlite_episode(self, rollout_id: str, database: Path) -> EpisodeTactile:
         # Avoid SELECT *: never load large raw/deform BLOBs while building
         # episode synchronization and F6 history.
-        with self._sqlite_connect(database) as connection:
+        with closing(self._sqlite_connect(database)) as connection:
             frames: list[dict[str, Any]] = []
             for frame in connection.execute(
                 "SELECT frame_index, elapsed_s, tick_wall_ns, tick_mono_ns, "
@@ -596,7 +597,7 @@ class FailRecoveryTactileService:
             rowid = event.get("_sqlite_rowid")
             if rowid is None:
                 return None
-            with self._sqlite_connect(episode.sqlite_path) as connection:
+            with closing(self._sqlite_connect(episode.sqlite_path)) as connection:
                 result = connection.execute(
                     f"SELECT {kind}_blob FROM tactile_frames WHERE rowid=?", (rowid,)
                 ).fetchone()

@@ -8,7 +8,7 @@ The repository keeps the familiar WebUI workspace shape while removing LF3R-spec
 - **Results** — the full tactile viewer with raw/deform sprites and F6 history curves;
 - **Runs** — read-only discovery of SHARPA experiment outputs under `outputs/`;
 - **Analysis** — annotation coverage and the four tactile event distributions;
-- **Settings** — standalone paths, default camera/image type, and theme.
+- **Settings** — standalone paths, display label registry, default camera/image type, and theme.
 
 There is intentionally no Repair page and no LIBERO, world-model, Robo-Dopamine, SAFE, or ProcVLM backend.
 
@@ -83,9 +83,15 @@ The synchronized tactile diagnostic viewer remains directly available at `http:/
 
 ## Annotation schema
 
-The standalone annotator intentionally exposes only numeric labels **6, 7, 8, 9**. Semantic label names are not stored in new tactile sidecars or shown in the annotation UI.
+The annotator uses a project-local label registry in `config/annotation_labels.json` (editable in **Settings → Annotation labels**). Names, descriptions, colors and active status drive Annotate, Results, and Analysis. Label IDs are stable: editing their presentation does not rewrite annotation records or change experiment targets.
 
-Each saved record keeps the experiment-compatible fields `rollout_id`, `event_index`, `event_key`, `start_frame`, and `end_frame`.
+The initial labels are **1 Success**, **2 Failure**, **3 Dropped object**, and **4 Wrong object**. Labels 3/4 are restricted to rollouts with authoritative `ground_truth_outcome=failure`. The other two describe local action intervals, not necessarily the final rollout outcome.
+
+Add new label IDs through Settings and choose `All` or `Failure only` before first save. Existing IDs and their eligibility scopes cannot be removed or changed; turn off **Active** to hide a label from new annotation choices while retaining previously saved intervals. An unregistered historical ID is shown rather than coerced into Success, but cannot be saved until registered or explicitly reassigned. Avoid repurposing an existing ID for a new semantic concept.
+
+The backend exposes `GET/POST /api/labels`. The label registry is checked by the server when saving intervals. This is a UI annotation schema, not an automatic mapping to training targets: downstream 0/1/2 online GT or other model labels remain defined by experiment code.
+
+Each saved record retains the experiment-compatible fields `rollout_id`, `event_index`, `event_key`, `start_frame`, and `end_frame`.
 
 Standalone annotations are stored one rollout per file under:
 
@@ -104,7 +110,7 @@ That historical file is loaded as a **read-only seed**. On the first edit, all s
 Keyboard controls on Annotate:
 
 ```text
-1 / 2 / 3 / 4   select keys 6 / 7 / 8 / 9
+1 / 2 / 3 / 4   select the corresponding label IDs
 Q / W           set active interval start / end to the current frame
 ↑ / ↓           previous / next active interval
 , / .           previous / next rollout

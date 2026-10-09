@@ -1702,6 +1702,7 @@ body.theme-dark .label-registry-row { border-color: var(--line); background: var
 .review-workspace { transition: grid-template-columns .16s ease; }
 .review-workspace.sidebar-collapsed { grid-template-columns: 0 minmax(0,1fr); }
 .review-workspace.sidebar-collapsed .queue-panel { display: none; }
+.review-workspace .review-stage { grid-column: 2; }
 .review-workspace.sidebar-collapsed .review-stage { min-width: 0; }
 .review-content { grid-template-columns: minmax(0,1.7fr) minmax(18rem,.72fr); }
 .media-column { padding: 20px 20px 26px; }
@@ -1760,6 +1761,7 @@ body.theme-dark .annotate-tactile-finger { background: var(--surface-raised); }
   .review-workspace.sidebar-collapsed { grid-template-columns: 0 minmax(0,1fr); }
 }
 @media (max-width: 850px) {
+  .review-workspace .review-stage { grid-column: 1; }
   .review-workspace.sidebar-collapsed { grid-template-columns: 1fr; }
   .review-workspace.sidebar-collapsed .queue-panel { display: none; }
 }

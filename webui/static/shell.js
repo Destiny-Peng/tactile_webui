@@ -532,7 +532,8 @@ async function loadAnnotateTactileFrame(frame, generation) {
     var cell = { finger: finger, f6: event && event.f6, url: null, loaded: false };
     cells.push(cell);
     if (info.event_id == null) return;
-    if (!event || !(event.image_kinds || []).includes(kind)) return;
+    // Older exports can carry images without an F6 series row.
+    if (event && !(event.image_kinds || []).includes(kind)) return;
     cell.url = annotateTactileImageUrl(record, finger, info.event_id, kind);
     loads.push(new Promise(function (resolve) {
       var image = new Image();

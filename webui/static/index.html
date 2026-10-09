@@ -37,7 +37,7 @@
   <main class="workspace-shell">
     <section id="view-annotate" class="view active-view">
       <div class="review-workspace">
-        <aside class="queue-panel">
+        <aside id="annotateSidebar" class="queue-panel">
           <div class="panel-heading">
             <div><p class="eyebrow">DATASET</p><h2>Rollouts</h2></div>
             <span id="annotateVisibleCount" class="count-chip">0</span>
@@ -61,8 +61,7 @@
             <div class="media-column">
               <section class="task-header">
                 <div>
-                  <div id="annotateBadges" class="badge-row"></div>
-                  <h2 id="annotateTaskTitle">Task</h2>
+                  <div class="task-title-row"><button id="toggleRolloutSidebar" class="sidebar-toggle ghost-button" type="button" aria-controls="annotateSidebar" aria-expanded="true" title="Collapse rollout list">‹</button><h2 id="annotateTaskTitle">Task</h2></div>
                   <p id="annotateRecordMeta" class="record-meta"></p>
                 </div>
                 <div class="navigation-actions">
@@ -72,7 +71,7 @@
               </section>
 
               <section class="video-view-controls">
-                <label class="compact-field"><span>Camera</span><select id="annotateCamera"></select></label>
+                <div id="annotateCamera" class="camera-view-controls" role="group" aria-label="Video camera view"></div>
                 <span id="annotateFrameText" class="mono">Frame 0 / 0</span>
                 <span id="annotateTimeText" class="mono">00:00.000</span>
                 <span id="annotateVideoHealth" class="health-pill idle">Video idle</span>
@@ -96,7 +95,12 @@
 
               <section class="tactile-preview-card">
                 <div><p class="eyebrow">CURRENT TACTILE FRAME</p><span id="annotateTactileStatus" class="muted">Waiting for synchronized tactile…</span></div>
-                <div id="annotateTactileGrid" class="annotate-tactile-grid" aria-label="Five-finger tactile images"></div>
+                <div id="annotateTactileGrid" class="annotate-tactile-grid" aria-label="Five-finger tactile images and current F6 values"></div>
+                <div class="tactile-f6-history">
+                  <div class="tactile-f6-heading"><strong>F6 history</strong><label>Finger <select id="annotateF6Finger"><option value="thumb">Thumb</option><option value="index" selected>Index</option><option value="middle">Middle</option><option value="ring">Ring</option><option value="pinky">Pinky</option></select></label></div>
+                  <div id="annotateF6Curve" class="tactile-f6-curve" aria-label="Six-channel tactile F6 history">Loading F6 history…</div>
+                  <div class="tactile-f6-legend"><span>F1</span><span>F2</span><span>F3</span><span>F4</span><span>F5</span><span>F6</span></div>
+                </div>
               </section>
             </div>
 

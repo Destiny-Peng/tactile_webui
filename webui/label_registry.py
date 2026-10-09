@@ -10,7 +10,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-DEFAULT_LABELS: list[dict[str, Any]] = [{"id":1,"name":"Success","description":"Successful local action interval; not necessarily the rollout outcome.","color":"#4f7df3","scope":"all","active":True},{"id":2,"name":"Failure","description":"Failed local action interval; may occur in an eventually successful rollout.","color":"#d96c6c","scope":"all","active":True},{"id":3,"name":"Dropped object","description":"The object is dropped during manipulation.","color":"#8a6fd1","scope":"failure","active":True},{"id":4,"name":"Wrong object","description":"The robot interacts with the wrong object.","color":"#2f9e8b","scope":"failure","active":True}]
+DEFAULT_LABELS: list[dict[str, Any]] = [{"id":1,"name":"Success","description":"Successful local action interval; not necessarily the rollout outcome.","color":"#4f7df3","scope":"all","active":True},{"id":2,"name":"Failure","description":"Failed local action interval; may occur in an eventually successful rollout.","color":"#d96c6c","scope":"all","active":True},{"id":3,"name":"Dropped object","description":"The object is dropped during manipulation.","color":"#8a6fd1","scope":"all","active":True},{"id":4,"name":"Wrong object","description":"The robot interacts with the wrong object.","color":"#2f9e8b","scope":"all","active":True}]
 COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 
@@ -22,6 +22,15 @@ class LabelRegistry:
         self._lock = threading.RLock()
         default = {"schema_version": 1, "dataset": "failrecovery", "labels": DEFAULT_LABELS}
         loaded = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else default
+        # The former failure-only restriction on IDs 3/4 came from a
+        # historical annotation-cleanup rule, not from manual annotation
+        # semantics. Upgrade legacy local registries without dropping any
+        # custom label names, colors, or extra IDs. A later Settings save will
+        # persist the updated scopes.
+        if isinstance(loaded, dict) and isinstance(loaded.get("labels"), list):
+            for row in loaded["labels"]:
+                if isinstance(row, dict) and row.get("id") in (3, 4) and row.get("scope") == "failure":
+                    row["scope"] = "all"
         self._data = self._validate(loaded)
 
     @staticmethod

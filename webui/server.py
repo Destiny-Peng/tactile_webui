@@ -80,7 +80,7 @@ class TactileApplication:
         # Logical entries may point to other disks through symlinks.
         dataset_dir = self.source_root / "datasets"
         candidates = list(sorted(dataset_dir.glob("*/manifest.jsonl")))
-        candidates += list(sorted(dataset_dir.glob("lf3r_failure_rollouts/v1/*manifest*.jsonl")))
+        candidates += [dataset_dir / "lf3r_failure_rollouts/v1/failrecovery_manifest.jsonl"]
         candidates += [dataset_dir / "lf3r_failure_rollouts/failrecovery_manifest.jsonl"]
         paths: list[Path] = []
         seen: set[Path] = set()

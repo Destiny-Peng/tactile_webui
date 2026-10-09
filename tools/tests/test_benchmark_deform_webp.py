@@ -15,12 +15,14 @@ sys.path.insert(0, str(ROOT / "tools"))
 try:
     from PIL import features
     import benchmark_deform_webp
+    webp_available = features.check("webp")
 except ImportError:
     benchmark_deform_webp = None
+    webp_available = False
 
 
 @unittest.skipUnless(
-    benchmark_deform_webp is not None and features.check("webp"),
+    webp_available,
     "Pillow with WebP support is required",
 )
 class DeformWebPBenchmarkTest(unittest.TestCase):

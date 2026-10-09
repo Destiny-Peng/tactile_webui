@@ -458,10 +458,61 @@ function ensureAnnotateTactileSeries(record, camera) {
     });
   return state.tactileSeriesPromise;
 }
+function formatAnnotateF6(values) {
+  if (!Array.isArray(values) || !values.length) return '<div class="tactile-f6-empty">No F6</div>';
+  return '<div class="tactile-f6-values">' + values.slice(0, 6).map(function (value, index) {
+    var number = Number(value);
+    return '<span><b>F' + (index + 1) + '</b>' + (Number.isFinite(number) ? escapeHtml(number.toFixed(3)) : '—') + '</span>';
+  }).join("") + '</div>';
+}
+function renderAnnotateF6Curve() {
+  var node = byId("annotateF6Curve"), series = state.tactileSeries;
+  if (!series || !series.fingers) { node.innerHTML = "No F6 history available."; return; }
+  var finger = byId("annotateF6Finger").value || "index";
+  var points = series.fingers[finger] || [];
+  if (!points.length) { node.innerHTML = 'No F6 history for ' + escapeHtml(finger) + '.'; return; }
+  // Limit SVG size for long tactile sequences; image playback remains independent.
+  var stride = Math.max(1, Math.ceil(points.length / 1400));
+  var sampled = points.filter(function (_row, i) { return i % stride === 0 || i === points.length - 1; });
+  var values = sampled.flatMap(function (point) {
+    return (point.f6 || []).slice(0, 6).map(Number).filter(Number.isFinite);
+  });
+  if (!values.length) { node.innerHTML = "No numeric F6 history."; return; }
+  var frameMin = Number(series.frame_min), frameMax = Number(series.frame_max);
+  if (!Number.isFinite(frameMin)) frameMin = Number(points[0].frame);
+  if (!Number.isFinite(frameMax) || frameMax <= frameMin) frameMax = frameMin + 1;
+  var min = Math.min.apply(Math, values), max = Math.max.apply(Math, values);
+  if (max <= min) { min -= .5; max += .5; }
+  var width = 800, height = 140;
+  var toX = function (frame) { return Math.max(0, Math.min(width, (Number(frame) - frameMin) / (frameMax - frameMin) * width)); };
+  var toY = function (value) { return height - (Number(value) - min) / (max - min) * height; };
+  var traces = [0, 1, 2, 3, 4, 5].map(function (channel) {
+    var coords = sampled.map(function (point) {
+      var value = Array.isArray(point.f6) ? Number(point.f6[channel]) : NaN;
+      return Number.isFinite(value) ? toX(point.frame).toFixed(2) + "," + toY(value).toFixed(2) : null;
+    }).filter(Boolean);
+    return coords.length ? '<polyline class="annotate-f6-trace f6-' + channel + '" points="' + coords.join(" ") + '"></polyline>' : "";
+  }).join("");
+  var x = toX(state.currentFrame);
+  node.innerHTML = '<div class="annotate-f6-axis"><span>' + escapeHtml(max.toFixed(3)) + '</span><span>' + escapeHtml(min.toFixed(3)) + '</span></div>'
+    + '<svg viewBox="0 0 ' + width + ' ' + height + '" preserveAspectRatio="none" role="img" aria-label="' + escapeHtml(finger) + ' six-channel F6 history">'
+    + '<line class="annotate-f6-grid" x1="0" x2="800" y1="70" y2="70"></line>' + traces
+    + '<line data-f6-playhead class="annotate-f6-playhead" x1="' + x + '" x2="' + x + '" y1="0" y2="' + height + '"></line></svg>';
+  node.dataset.frameMin = frameMin;
+  node.dataset.frameMax = frameMax;
+}
+function updateAnnotateF6Playhead(frame) {
+  var node = byId("annotateF6Curve"), head = node.querySelector("[data-f6-playhead]");
+  if (!head) return;
+  var min = Number(node.dataset.frameMin), max = Number(node.dataset.frameMax);
+  if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) return;
+  var x = Math.max(0, Math.min(800, (frame - min) / (max - min) * 800));
+  head.setAttribute("x1", x.toFixed(2)); head.setAttribute("x2", x.toFixed(2));
+}
 async function loadAnnotateTactileFrame(frame, generation) {
   var record = selectedRollout();
   if (!record) return;
-  var camera = byId("annotateCamera").value || chooseCamera(record);
+  var camera = state.annotateCamera || chooseCamera(record);
   var kind = state.settings && state.settings.default_tactile_kind || "deform";
   var series = await ensureAnnotateTactileSeries(record, camera);
   if (generation !== state.tactileGeneration || !series) return;
@@ -471,39 +522,37 @@ async function loadAnnotateTactileFrame(frame, generation) {
   var key = record.id + "|" + camera + "|" + sync.frame + "|" + kind + "|"
     + TACTILE_FINGERS.map(function (finger) { return fingerRows[finger] && fingerRows[finger].event_id != null ? fingerRows[finger].event_id : "-"; }).join(",");
   if (key === state.tactileAppliedKey) return;
-  byId("annotateTactileStatus").textContent = camera + " · video " + frame + " → tactile " + sync.frame + " · loading " + kind;
+  byId("annotateTactileStatus").textContent = camera + " · video " + frame + " → tactile " + sync.frame + " · " + kind;
   var cells = [];
   var loads = [];
   var started = performance.now();
   TACTILE_FINGERS.forEach(function (finger) {
     var info = fingerRows[finger] || {};
-    if (info.event_id == null) { cells.push({ finger: finger, missing: true }); return; }
-    var url = annotateTactileImageUrl(record, finger, info.event_id, kind);
-    cells.push({ finger: finger, url: url });
-    loads.push(new Promise(function (resolve, reject) {
+    var event = info.event_id == null ? null : state.tactileF6Lookup[finger] && state.tactileF6Lookup[finger].get(String(info.event_id));
+    var cell = { finger: finger, f6: event && event.f6, url: null, loaded: false };
+    cells.push(cell);
+    if (info.event_id == null) return;
+    if (!event || !(event.image_kinds || []).includes(kind)) return;
+    cell.url = annotateTactileImageUrl(record, finger, info.event_id, kind);
+    loads.push(new Promise(function (resolve) {
       var image = new Image();
-      image.onload = resolve;
-      image.onerror = function () { reject(new Error(finger + " tactile image failed")); };
-      image.src = url;
+      image.onload = function () { cell.loaded = true; resolve(); };
+      image.onerror = function () { resolve(); };
+      image.src = cell.url;
     }));
   });
-  try {
-    await Promise.all(loads);
-  } catch (error) {
-    if (generation !== state.tactileGeneration) return;
-    byId("annotateTactileStatus").textContent = "Tactile image load failed; keeping previous frame";
-    queueTelemetry({ event: "tactile_image_error", level: "error", rollout_id: record.id, camera: camera, frame: frame, matched_frame: sync.frame, kind: kind, message: String(error.message || error) });
-    return;
-  }
-  if (generation !== state.tactileGeneration || record.id !== state.selectedId) return;
+  await Promise.all(loads);
+  if (generation !== state.tactileGeneration || record.id !== state.selectedId || camera !== state.annotateCamera) return;
   byId("annotateTactileGrid").innerHTML = cells.map(function (cell) {
     return '<div class="annotate-tactile-finger"><strong>' + escapeHtml(cell.finger) + '</strong>'
-      + (cell.missing ? '<div class="tactile-missing">No sample</div>' : '<img src="' + escapeHtml(cell.url) + '" alt="' + escapeHtml(cell.finger + " " + kind) + '">') + '</div>';
+      + (cell.loaded ? '<img src="' + escapeHtml(cell.url) + '" alt="' + escapeHtml(cell.finger + " " + kind) + '">'
+        : '<div class="tactile-missing">No image</div>')
+      + formatAnnotateF6(cell.f6) + '</div>';
   }).join("");
   state.tactileAppliedKey = key;
   var duration = performance.now() - started;
   if (duration >= 250) queueTelemetry({ event: "tactile_batch_slow", level: duration >= 1000 ? "error" : "info", rollout_id: record.id, camera: camera, frame: frame, matched_frame: sync.frame, kind: kind, duration_ms: duration });
-  byId("annotateTactileStatus").textContent = camera + " · video " + frame + " → tactile " + sync.frame + " · " + kind;
+  byId("annotateTactileStatus").textContent = camera + " · video " + frame + " → tactile " + sync.frame + " · " + kind + " + F6";
 }
 async function drainAnnotateTactileQueue() {
   if (state.tactileLoadActive) return;
@@ -981,7 +1030,12 @@ function bindEvents() {
   document.querySelectorAll(".nav-item").forEach(function (button) { button.addEventListener("click", function () { switchView(button.dataset.view); }); });
   byId("annotateSearch").addEventListener("input", filterRollouts); byId("annotateTaskFilter").addEventListener("change", filterRollouts); byId("annotateReviewFilter").addEventListener("change", filterRollouts);
   byId("annotatePrevious").addEventListener("click", function () { navigateRollout(-1); }); byId("annotateNext").addEventListener("click", function () { navigateRollout(1); });
-  byId("annotateCamera").addEventListener("change", function () { state.tactileSeries = null; state.tactileSeriesKey = ""; state.tactileSeriesPromise = null; state.tactileAppliedKey = ""; state.tactilePendingFrame = null; state.tactileGeneration += 1; loadAnnotateVideo(); seekFrame(0); }); byId("annotatePlay").addEventListener("click", togglePlay); byId("annotateStepBack").addEventListener("click", function () { seekFrame(state.currentFrame - 1); }); byId("annotateStepForward").addEventListener("click", function () { seekFrame(state.currentFrame + 1); }); byId("annotateFrameSlider").addEventListener("input", function (event) { seekFrame(event.target.value); });
+  byId("annotateCamera").addEventListener("click", function (event) {
+    var button = event.target.closest("[data-camera]");
+    if (button) switchAnnotateCamera(button.dataset.camera);
+  });
+  byId("toggleRolloutSidebar").addEventListener("click", function () { setRolloutSidebarCollapsed(!state.sidebarCollapsed); });
+  byId("annotateF6Finger").addEventListener("change", renderAnnotateF6Curve); byId("annotatePlay").addEventListener("click", togglePlay); byId("annotateStepBack").addEventListener("click", function () { seekFrame(state.currentFrame - 1); }); byId("annotateStepForward").addEventListener("click", function () { seekFrame(state.currentFrame + 1); }); byId("annotateFrameSlider").addEventListener("input", function (event) { seekFrame(event.target.value); });
   byId("annotateVideo").addEventListener("play", function () { byId("annotatePlay").textContent = "Pause"; }); byId("annotateVideo").addEventListener("pause", function () { byId("annotatePlay").textContent = "Play"; }); byId("annotateVideo").addEventListener("timeupdate", function () { var record = selectedRollout(); if (record) updateFrameUi(Math.round(byId("annotateVideo").currentTime * (Number(record.fps) || 30)), false); });
   byId("addInterval").addEventListener("click", function () {
     var label = state.labels.find(function (item) { return eligibleLabel(item, selectedRollout()); });
@@ -1006,6 +1060,7 @@ function bindEvents() {
 async function init() {
   bindEvents(); monitorVideo("annotateVideo", "annotate"); monitorVideo("resultsVideo", "results"); initPerformanceObserver();
   var requested = (location.hash || "#annotate").slice(1); if (!byId("view-" + requested)) requested = "annotate"; switchView(requested, false);
+  try { setRolloutSidebarCollapsed(sessionStorage.getItem("tactile.annotate.sidebarCollapsed") === "1"); } catch (_error) { setRolloutSidebarCollapsed(false); }
   try {
     var settingsPayload = await jsonRequest("/api/settings"); state.settings = settingsPayload.settings || {}; state.annotationSource = settingsPayload.annotation_source || null; state.annotationTarget = settingsPayload.annotation_target || null; applyTheme(state.settings.theme); await loadRollouts(); await checkHealth();
   } catch (error) { setGlobalStatus(false, error.message); byId("datasetStatus").textContent = "Dataset unavailable"; }

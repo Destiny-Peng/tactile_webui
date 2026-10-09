@@ -38,30 +38,30 @@ tools/
 
 Large data, model checkpoints, generated outputs and third-party repositories are intentionally not copied into source control.
 
-## Expected data layout
+## Data sources: peer manifests + original SQLite
 
-The WebUI and SHARPA scripts retain the fail-recovery layout used by the dissertation project:
+The WebUI automatically discovers all `datasets/*/manifest.jsonl` peer manifests, including symlinks. It checks duplicate rollout IDs across manifests, shows manifest provenance, and resolves relative media paths against each dataset's own data root. The existing LF3R fail-recovery manifest location is supported as a fallback.
 
-```text
-datasets/
-  failrecovery/
-    manifest.jsonl
-    <episode files/directories...>
-```
+**Existing LF3R manifest:** keep your symlink. If a row has a valid `source_database_path`, the WebUI prefers the original `episode.sqlite3` and original `videos/realsense_color.mp4` / `videos/wrist_right.mp4`. Nothing is extracted. If the original recorder database is unavailable, the older JSONL + `.u8` export reader still works.
 
-Manifest entries use the exported fields `camera_video_paths`, `synchronized_frames_path`, `tactile_events_path`, and `tactile_stream_paths`.
-
-The fail-recovery payload does not need to be copied. `datasets/failrecovery/manifest.jsonl` may be a symlink to the original LF3R manifest. When it is linked, the WebUI resolves the symlink target, inspects the project-relative paths stored in that manifest, and automatically infers the original source-project root. Video, synchronization, tactile-event, tactile-stream, and historical interval-seed paths therefore continue to resolve against the original LF3R tree while new annotations stay local to this repository.
-
-## One-command migration
-
-To connect this repository to an existing dissertation/LF3R data tree without copying the payload, run:
+**New original SQLite dataset:** index its recording directory once:
 
 ```bash
-bash tools/migrate_from_lf3r.sh /mnt/hdd/pyr/LF3R
+python tools/index_sqlite_dataset.py /mnt/hdd/qiuxia/datasets/failrecovery --name raw_failrecovery
+./start.sh
 ```
 
-The script copies the exported fail-recovery dataset into `datasets/failrecovery/`, rewrites manifest paths that still contain `/v1/`, migrates annotation records/events and USB interval seeds, and copies the tactile encoder checkpoints plus the two external tactile repositories when present. It intentionally does not copy virtual environments, raw recorder SQLite data, or historical generated SHARPA runs.
+This generates only `datasets/raw_failrecovery/manifest.jsonl` and a small summary JSON in this repository; it never copies or modifies recorder SQLite files, raw/deform BLOBs or MP4s. Each source episode is expected to have `episode.sqlite3`, `manifest.json`, and `videos/realsense_color.mp4` plus `videos/wrist_right.mp4`. The indexer requires `ffprobe`. Specify a different unique `--name` for each dataset and `--overwrite` to explicitly refresh a locally generated manifest. Do not index the same episodes a second time if your existing linked LF3R manifest already exposes their original database; peer manifests with duplicate rollout IDs are marked invalid rather than silently overwritten.
+
+The online viewer loads `synchronized_frames` and the small non-BLOB event fields (including F6) from SQLite when an episode is opened. Each requested tactile image reads only that `event_id`'s Raw or Deform BLOB and encodes a grayscale PNG in memory, with bounded LRU caches. The original SQLite is opened read-only. No `frames.jsonl`, `events.jsonl`, `.u8`, or pre-generated PNG is required. The raw MP4s are served as-is through HTTP range requests; their codecs still need to be supported by the browser (no automatic transcoding).
+
+## Link an existing LF3R manifest
+
+```bash
+bash tools/migrate_from_lf3r.sh /mnt/hdd/qiuxia/pyr/LF3R
+```
+
+This script updates the standalone manifest symlink and optional encoder repository symlinks. New annotations stay local; it does not copy the dataset or rewrite the source manifest.
 
 ## Run the WebUI
 
@@ -207,33 +207,9 @@ checkpoints/T-Rex/encoders/
 
 This split does not include LIBERO, repair/world-model code, general LF3R baseline jobs, Robo-Dopamine/SAFE/ProcVLM integrations, raw tactile datasets, checkpoints, or vendored third-party repositories.
 
-## Static tactile images
+## Legacy static image compatibility
 
-The WebUI uses materialized tactile PNGs for display instead of encoding PNGs on every frame request. Images are grouped by kind and finger inside each episode:
-
-```text
-tactile/images/
-  deform/
-    thumb/
-    index/
-    middle/
-    ring/
-    pinky/
-  raw/
-    thumb/
-    index/
-    middle/
-    ring/
-    pinky/
-```
-
-Filenames use the per-finger `sample_index` (`000000.png`, `000001.png`, ...), so repeated video frames that reference the same tactile event do not duplicate images. `tools/migrate_from_lf3r.sh` materializes these files automatically. For an existing canonical dataset, run:
-
-```bash
-python tools/materialize_tactile_images.py --root .
-```
-
-The server retains a compatibility fallback to the packed `.u8` streams when a static PNG is missing, but migrated and newly exported episodes use the static path.
+Existing exported datasets with materialized PNGs still work. The original SQLite path takes priority when present; otherwise the legacy reader uses its old PNG and packed `.u8` fallback. You do not need to regenerate those exported images for the WebUI.
 
 ## Migrated SHARPA tools
 

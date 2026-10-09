@@ -1,0 +1,16 @@
+{
+  "schema_version": "tactile_intervals_v1",
+  "rollout_id": "raw_failrecovery--20260929_235949_usb_0929_mixedfail_0079",
+  "ground_truth_outcome": "failure",
+  "outcome_provenance": {
+    "source": "/mnt/hdd/qiuxia/pyr/LF3R/datasets/lf3r_failure_rollouts/v1/failrecovery_manifest.jsonl",
+    "sha256": "ce68fefa99b8507b8f6f9b779e28e4582db46beffefe6a1922d555f6b81c164f",
+    "field": "ground_truth_outcome",
+    "outcome_source": "filename"
+  },
+  "total_frames": 431,
+  "intervals": [],
+  "tactile_intervals": [],
+  "review_status": "unreviewed",
+  "migration_source": "/mnt/hdd/qiuxia/pyr/tactile_webui/annotations/tactile_canonical/v1/records/raw_failrecovery--20260929_235949_usb_0929_mixedfail_0079.json"
+}

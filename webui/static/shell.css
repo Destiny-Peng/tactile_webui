@@ -1769,3 +1769,13 @@ body.theme-dark .annotate-tactile-finger { background: var(--surface-raised); }
   .annotate-tactile-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .tactile-f6-values { grid-template-columns: repeat(3,minmax(0,1fr)); }
 }
+
+/* Runs: LF3R-style manifest-scoped H.264 batch utility. */
+.video-transcode-toolbar { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin:12px 0; }
+.video-transcode-manifests { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:8px; margin-bottom:12px; }
+.video-transcode-choice { display:flex; align-items:start; gap:9px; padding:10px; border:1px solid var(--line); border-radius:8px; background:var(--surface-raised); cursor:pointer; min-width:0; }
+.video-transcode-choice input { margin-top:4px; flex:0 0 auto; }
+.video-transcode-choice span { display:flex; flex-direction:column; gap:3px; min-width:0; }
+.video-transcode-choice strong { font-size:.72rem; overflow-wrap:anywhere; }
+.video-transcode-choice small { font-size:.62rem; color:var(--muted); overflow-wrap:anywhere; }
+.video-transcode-log { min-height:80px; max-height:230px; padding:12px; margin-top:10px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; border:1px solid var(--line); border-radius:8px; background:var(--surface-raised); color:var(--text); font-size:.66rem; line-height:1.55; }

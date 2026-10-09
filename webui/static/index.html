@@ -157,6 +157,15 @@
 
     <section id="view-runs" class="view page-view">
       <section class="surface-card page-card"><div class="panel-heading"><div><p class="eyebrow">SHARPA EXPERIMENTS</p><h2>Runs</h2></div><button id="refreshRuns" class="ghost-button" type="button">Refresh</button></div><p class="muted">Standalone tactile outputs only.</p><div class="command-card"><code>bash tools/run_sharpa_tactile_ablation.sh &lt;module&gt; [arguments…]</code></div><div id="runsRoot" class="source-line"></div><div id="runsList" class="runs-list"></div></section>
+      <section class="surface-card page-card">
+        <div class="panel-heading"><div><p class="eyebrow">UTILITIES</p><h2>Batch H.264 transcode</h2></div></div>
+        <p class="muted">Convert camera videos from selected manifests for browser playback. Original videos and SQLite remain untouched. Already-compatible videos are skipped; output is saved under cache/videos/h264/.</p>
+        <div class="video-transcode-toolbar"><button id="videoTranscodeAll" type="button" class="ghost-button">Select all</button><button id="videoTranscodeNone" type="button" class="ghost-button">Clear</button><span id="videoTranscodeSelection" class="source-line"></span></div>
+        <div id="videoTranscodeManifests" class="video-transcode-manifests">Loading manifests…</div>
+        <div class="video-transcode-toolbar"><button id="videoTranscodeRun" type="button" class="primary-button">Transcode selected manifests</button><button id="videoTranscodeRefresh" type="button" class="ghost-button">Refresh status</button></div>
+        <div id="videoTranscodeStatus" class="source-line" role="status"></div>
+        <pre id="videoTranscodeLog" class="video-transcode-log"></pre>
+      </section>
     </section>
 
     <section id="view-analysis" class="view page-view">

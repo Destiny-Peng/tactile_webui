@@ -884,7 +884,117 @@ async function loadAnalysis() {
     byId("taskAnalysisTable").innerHTML = '<table class="data-table"><thead><tr><th>Task</th><th>Rollouts</th><th>Annotated</th><th>Coverage</th><th>Intervals</th></tr></thead><tbody>' + (data.tasks || []).map(function (row) { return '<tr><td>' + escapeHtml(row.task) + '</td><td>' + row.rollouts + '</td><td>' + row.reviewed + '</td><td>' + formatPercent(row.rollouts ? row.reviewed / row.rollouts : 0) + '</td><td>' + row.events + '</td></tr>'; }).join("") + '</tbody></table>';
   } catch (error) { cards.innerHTML = '<div class="metric-card"><span class="message error">' + escapeHtml(error.message) + '</span></div>'; }
 }
+var batchTranscodeSelected = null;
+var batchTranscodeLoaded = false;
+var batchTranscodeRunning = false;
+var batchTranscodeCatalog = [];
+
+function transcodeChoices() {
+  return Array.from(byId("videoTranscodeManifests").querySelectorAll("input[data-manifest]:checked"))
+    .map(function (input) { return input.dataset.manifest; });
+}
+function updateTranscodeSelection() {
+  var selected = transcodeChoices();
+  var rollouts = batchTranscodeCatalog.reduce(function (count, entry) {
+    return count + (selected.indexOf(entry.path) >= 0 ? Number(entry.rollouts || 0) : 0);
+  }, 0);
+  byId("videoTranscodeSelection").textContent =
+    selected.length + " / " + batchTranscodeCatalog.length
+    + " manifests · " + rollouts + " rollouts";
+  byId("videoTranscodeRun").disabled = !selected.length || batchTranscodeRunning;
+}
+function renderVideoTranscodeManifests(manifests) {
+  var host = byId("videoTranscodeManifests");
+  host.innerHTML = "";
+  batchTranscodeCatalog = (manifests || []).filter(function (entry) { return entry && entry.path; });
+  if (!batchTranscodeCatalog.length) {
+    host.textContent = "No manifests found under datasets/*/manifest.jsonl.";
+    updateTranscodeSelection();
+    return;
+  }
+  batchTranscodeCatalog.forEach(function (entry) {
+    var label = document.createElement("label");
+    label.className = "video-transcode-choice";
+    var checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.dataset.manifest = String(entry.path);
+    checkbox.disabled = !entry.valid;
+    checkbox.checked = Boolean(entry.valid && (
+      batchTranscodeSelected === null || batchTranscodeSelected.indexOf(entry.path) >= 0
+    ));
+    checkbox.addEventListener("change", function () {
+      batchTranscodeSelected = transcodeChoices();
+      updateTranscodeSelection();
+    });
+    var body = document.createElement("span");
+    var title = document.createElement("strong");
+    title.textContent = String(entry.label || entry.path);
+    var details = document.createElement("small");
+    details.textContent = entry.path + " · " + (entry.rollouts || 0) + " rollout(s)"
+      + (entry.valid ? "" : " · unavailable: " + (entry.error || "invalid"));
+    body.appendChild(title);
+    body.appendChild(details);
+    label.appendChild(checkbox);
+    label.appendChild(body);
+    host.appendChild(label);
+  });
+  batchTranscodeSelected = transcodeChoices();
+  updateTranscodeSelection();
+}
+async function loadVideoTranscode(forceChoices) {
+  try {
+    var data = await jsonRequest("/api/video-transcode");
+    if (!batchTranscodeLoaded || forceChoices) {
+      renderVideoTranscodeManifests(data.manifests || []);
+      batchTranscodeLoaded = true;
+    }
+    var job = data.job || null;
+    batchTranscodeRunning = Boolean(job && (job.status === "running" || job.status === "queued"));
+    byId("videoTranscodeStatus").textContent = job
+      ? "Job " + job.job_id + " · " + job.status
+        + " · " + (job.processed || 0) + "/" + (job.total || 0) + " videos"
+        + " · converted " + (job.converted || 0)
+        + " · already H.264 " + (job.already_h264 || 0)
+        + " · cached " + (job.cached || 0)
+        + " · failed " + (job.failed || 0)
+        + (job.current ? " · " + job.current : "")
+        + (job.error ? " · " + job.error : "")
+      : "No H.264 conversion started. Original videos remain unchanged.";
+    byId("videoTranscodeLog").textContent = data.log_tail || "";
+    updateTranscodeSelection();
+  } catch (error) {
+    byId("videoTranscodeStatus").textContent = "H.264 utility error: " + String(error.message || error);
+  }
+}
+async function submitVideoTranscode() {
+  var selected = transcodeChoices();
+  if (!selected.length || batchTranscodeRunning) return;
+  var message = "Convert all camera videos from " + selected.length + " manifest(s)?"
+    + "\n\nThe source MP4 and SQLite will not be changed."
+    + "\nH.264 copies will be written only to cache/videos/h264/."
+    + "\nExisting H.264 videos and completed conversions will be skipped.";
+  if (!window.confirm(message)) return;
+  byId("videoTranscodeRun").disabled = true;
+  try {
+    var started = await jsonRequest("/api/video-transcode", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ manifest_paths: selected })
+    });
+    byId("videoTranscodeStatus").textContent = "Started " + started.job_id
+      + " · " + started.total + " unique videos";
+    batchTranscodeRunning = true;
+    await loadVideoTranscode(false);
+  } catch (error) {
+    byId("videoTranscodeStatus").textContent = "Cannot start H.264 batch: " + String(error.message || error);
+    batchTranscodeRunning = false;
+  } finally {
+    updateTranscodeSelection();
+  }
+}
+
 async function loadRuns() {
+  loadVideoTranscode(false);
   var container = byId("runsList"); container.innerHTML = '<div class="muted">Loading tactile experiment outputs…</div>';
   try {
     var payload = await jsonRequest("/api/runs"); byId("runsRoot").textContent = "Scanning: " + payload.runs_root; var runs = payload.runs || [];
@@ -1047,6 +1157,20 @@ function bindEvents() {
   byId("labelRegistryRows").addEventListener("input", updateLabelDraft);
   byId("labelRegistryRows").addEventListener("change", updateLabelDraft);
   byId("resultsSource").addEventListener("change", loadResultsCurve); byId("resultsRollout").addEventListener("change", loadResultsCurve); byId("resultsCamera").addEventListener("change", function () { loadResultsVideo(); seekResultsFrame(0); }); byId("refreshResults").addEventListener("click", function () { loadResultsSources(true); }); byId("resultsPlay").addEventListener("click", toggleResultsPlay); byId("resultsStepBack").addEventListener("click", function () { seekResultsFrame(state.results.currentFrame - 1); }); byId("resultsStepForward").addEventListener("click", function () { seekResultsFrame(state.results.currentFrame + 1); }); byId("resultsFrameSlider").addEventListener("input", function (event) { seekResultsFrame(event.target.value); }); byId("resultsVideo").addEventListener("play", function () { byId("resultsPlay").textContent = "Pause"; }); byId("resultsVideo").addEventListener("pause", function () { byId("resultsPlay").textContent = "Play"; }); byId("resultsVideo").addEventListener("timeupdate", function () { var record = resultRollout(); if (record) updateResultsFrame(Math.round(byId("resultsVideo").currentTime * (Number(record.fps) || 30))); });
+  byId("videoTranscodeAll").addEventListener("click", function () {
+    byId("videoTranscodeManifests").querySelectorAll("input[data-manifest]:not(:disabled)")
+      .forEach(function (input) { input.checked = true; });
+    batchTranscodeSelected = transcodeChoices();
+    updateTranscodeSelection();
+  });
+  byId("videoTranscodeNone").addEventListener("click", function () {
+    byId("videoTranscodeManifests").querySelectorAll("input[data-manifest]")
+      .forEach(function (input) { input.checked = false; });
+    batchTranscodeSelected = [];
+    updateTranscodeSelection();
+  });
+  byId("videoTranscodeRun").addEventListener("click", submitVideoTranscode);
+  byId("videoTranscodeRefresh").addEventListener("click", function () { loadVideoTranscode(true); });
   byId("refreshRuns").addEventListener("click", loadRuns); byId("refreshAnalysis").addEventListener("click", loadAnalysis); byId("settingsForm").addEventListener("submit", saveSettings); byId("refreshDiagnostics").addEventListener("click", loadDiagnostics);
   window.addEventListener("beforeunload", function (event) { flushTelemetry(); if (state.dirty) { event.preventDefault(); event.returnValue = ""; } });
   window.addEventListener("keydown", function (event) {
@@ -1066,6 +1190,7 @@ async function init() {
     var settingsPayload = await jsonRequest("/api/settings"); state.settings = settingsPayload.settings || {}; state.annotationSource = settingsPayload.annotation_source || null; state.annotationTarget = settingsPayload.annotation_target || null; applyTheme(state.settings.theme); await loadRollouts(); await checkHealth();
   } catch (error) { setGlobalStatus(false, error.message); byId("datasetStatus").textContent = "Dataset unavailable"; }
   window.setInterval(checkHealth, 15000); window.setInterval(function () { if (state.view === "settings") loadDiagnostics(); }, 10000);
+  window.setInterval(function () { if (state.view === "runs") loadVideoTranscode(false); }, 3000);
 }
 
 init();

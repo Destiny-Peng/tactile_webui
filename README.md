@@ -81,6 +81,8 @@ Then open `http://127.0.0.1:8765/` for the default host/port. Runtime logs remai
 
 The synchronized tactile diagnostic viewer remains directly available at `http://127.0.0.1:8765/tactile`. The main **Results** page is now the online-detection review surface.
 
+**Annotate** has a collapsible rollout queue (arrow beside the task title) and LF3R-style camera view buttons when multiple video views exist; changing cameras preserves the current frame and resumes playback if needed. Its tactile preview combines five-finger deform/raw images with **current F6 values for each finger**, plus a selectable finger's **six-channel F6 history** and a video-synchronized playhead. Raw/deform is selected via Settings; the F6 display is independent of image kind.
+
 ## Annotation schema
 
 The annotator uses a project-local label registry in `config/annotation_labels.json` (editable in **Settings → Annotation labels**). Names, descriptions, colors and active status drive Annotate, Results, and Analysis. Label IDs are stable: editing their presentation does not rewrite annotation records or change experiment targets.

@@ -6,33 +6,25 @@
       "id": 1,
       "name": "Success",
       "description": "Successful local action interval; not necessarily the rollout outcome.",
-      "color": "#4f7df3",
-      "scope": "all",
-      "active": true
+      "color": "#4f7df3"
     },
     {
       "id": 2,
       "name": "Failure",
       "description": "Failed local action interval; may occur in an eventually successful rollout.",
-      "color": "#d96c6c",
-      "scope": "all",
-      "active": true
+      "color": "#d96c6c"
     },
     {
       "id": 3,
       "name": "Dropped object",
       "description": "The object is dropped during manipulation.",
-      "color": "#8a6fd1",
-      "scope": "failure",
-      "active": true
+      "color": "#8a6fd1"
     },
     {
       "id": 4,
       "name": "Wrong object",
       "description": "The robot interacts with the wrong object.",
-      "color": "#2f9e8b",
-      "scope": "failure",
-      "active": true
+      "color": "#2f9e8b"
     }
   ]
 }

@@ -10,12 +10,37 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-DEFAULT_LABELS: list[dict[str, Any]] = [{"id":1,"name":"Success","description":"Successful local action interval; not necessarily the rollout outcome.","color":"#4f7df3","scope":"all","active":True},{"id":2,"name":"Failure","description":"Failed local action interval; may occur in an eventually successful rollout.","color":"#d96c6c","scope":"all","active":True},{"id":3,"name":"Dropped object","description":"The object is dropped during manipulation.","color":"#8a6fd1","scope":"failure","active":True},{"id":4,"name":"Wrong object","description":"The robot interacts with the wrong object.","color":"#2f9e8b","scope":"failure","active":True}]
+DEFAULT_LABELS: list[dict[str, Any]] = [
+    {
+        "id": 1,
+        "name": "Success",
+        "description": "Successful local action interval; not necessarily the rollout outcome.",
+        "color": "#4f7df3"
+    },
+    {
+        "id": 2,
+        "name": "Failure",
+        "description": "Failed local action interval; may occur in an eventually successful rollout.",
+        "color": "#d96c6c"
+    },
+    {
+        "id": 3,
+        "name": "Dropped object",
+        "description": "The object is dropped during manipulation.",
+        "color": "#8a6fd1"
+    },
+    {
+        "id": 4,
+        "name": "Wrong object",
+        "description": "The robot interacts with the wrong object.",
+        "color": "#2f9e8b"
+    }
+]
 COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 
 class LabelRegistry:
-    """Labels 1-4 are stable; new IDs are append-only and scopes are immutable."""
+    """Label IDs stay stable; labels have no rollout-outcome eligibility rules."""
 
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -45,26 +70,20 @@ class LabelRegistry:
             name = raw.get("name")
             description = raw.get("description")
             color = raw.get("color")
-            scope = raw.get("scope")
-            active = raw.get("active")
             if not isinstance(name, str) or not 1 <= len(name.strip()) <= 64:
                 raise ValueError(f"label {label_id}: name must be 1-64 characters")
             if not isinstance(description, str) or len(description) > 500:
                 raise ValueError(f"label {label_id}: description must be <=500 characters")
             if not isinstance(color, str) or not COLOR.fullmatch(color):
                 raise ValueError(f"label {label_id}: color must be #RRGGBB")
-            if scope not in ("all", "failure"):
-                raise ValueError(f"label {label_id}: scope must be all or failure")
-            if type(active) is not bool:
-                raise ValueError(f"label {label_id}: active must be boolean")
             normalized.append({
                 "id": label_id, "name": name.strip(), "description": description.strip(),
-                "color": color.lower(), "scope": scope, "active": active,
+                "color": color.lower(),
             })
         by_id = {row["id"]: row for row in normalized}
         for default in DEFAULT_LABELS:
-            if default["id"] not in by_id or by_id[default["id"]]["scope"] != default["scope"]:
-                raise ValueError(f"label {default['id']}: required ID/scope cannot change")
+            if default["id"] not in by_id:
+                raise ValueError(f"label {default['id']}: required ID cannot be removed")
         return {"schema_version": 1, "dataset": "failrecovery", "labels": sorted(normalized, key=lambda row: row["id"])}
 
     def snapshot(self) -> dict[str, Any]:
@@ -86,8 +105,6 @@ class LabelRegistry:
             for label_id, original in previous.items():
                 if label_id not in current:
                     raise ValueError(f"label {label_id}: existing IDs cannot be removed or reused; deactivate instead")
-                if current[label_id]["scope"] != original["scope"]:
-                    raise ValueError(f"label {label_id}: existing scope cannot change")
             self.path.parent.mkdir(parents=True, exist_ok=True)
             content = json.dumps(validated, indent=2, ensure_ascii=False) + "\n"
             fd, temporary = tempfile.mkstemp(prefix=".labels-", suffix=".tmp", dir=self.path.parent)

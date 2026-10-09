@@ -65,7 +65,7 @@ function isTypingTarget(target) {
 }
 function labelMeta(id) { return state.labels.find(function (row) { return row.id === Number(id); }) || null; }
 function labelName(id) { var meta = labelMeta(id); return meta ? meta.name : "Unknown " + id; }
-function eligibleLabel(label, record) { return Boolean(label && label.active && (label.scope !== "failure" || record && record.ground_truth_outcome === "failure")); }
+function eligibleLabel(label) { return Boolean(label); }
 function displayedLabel(id) { return id + " · " + labelName(id); }
 function badge(label, cssClass) {
   return '<span class="badge ' + escapeHtml(cssClass || "") + '">' + escapeHtml(label) + "</span>";
@@ -601,11 +601,8 @@ function togglePlay() {
   if (video.paused || video.ended) video.play().catch(function () {}); else video.pause();
 }
 function eventOptions(selected) {
-  var record = selectedRollout();
-  var options = state.labels.filter(function (label) {
-    return eligibleLabel(label, record) || label.id === Number(selected);
-  }).map(function (label) {
-    return '<option value="' + label.id + '"' + (label.id === Number(selected) ? ' selected' : '') + '>' + escapeHtml(displayedLabel(label.id)) + (label.active ? '' : ' (inactive)') + '</option>';
+  var options = state.labels.map(function (label) {
+    return '<option value="' + label.id + '"' + (label.id === Number(selected) ? ' selected' : '') + '>' + escapeHtml(displayedLabel(label.id)) + '</option>';
   });
   if (!labelMeta(selected)) options.unshift('<option selected value="' + escapeHtml(selected) + '">Unregistered label ' + escapeHtml(selected) + '</option>');
   return options.join('');
@@ -613,12 +610,8 @@ function eventOptions(selected) {
 function renderAnnotationLabelGuide() {
   var node = byId("annotationLabelGuide");
   if (!node) return;
-  var record = selectedRollout();
-  node.innerHTML = state.labels.filter(function (label) {
-    return label.active || state.events.some(function (event) { return Number(event.event_key) === label.id; });
-  }).map(function (label) {
-    var eligible = eligibleLabel(label, record);
-    return '<div class="annotation-label-definition' + (eligible ? '' : ' ineligible') + '" title="' + escapeHtml(label.description) + '"><i class="label-mark" style="background:' + label.color + '"></i><strong>' + label.id + ' · ' + escapeHtml(label.name) + '</strong><span class="label-explanation">' + escapeHtml(label.description) + (label.scope === 'failure' ? ' · failure only' : '') + (label.active ? '' : ' · inactive') + '</span></div>';
+  node.innerHTML = state.labels.map(function (label) {
+    return '<div class="annotation-label-definition" title="' + escapeHtml(label.description) + '"><i class="label-mark" style="background:' + label.color + '"></i><strong>' + label.id + ' · ' + escapeHtml(label.name) + '</strong><span class="label-explanation">' + escapeHtml(label.description) + '</span></div>';
   }).join('');
 }
 function renderActiveLabelHelp() {
@@ -626,8 +619,8 @@ function renderActiveLabelHelp() {
   var event = state.activeEvent == null ? null : state.events[state.activeEvent];
   if (!event) { node.textContent = 'Select a label to see its definition.'; node.className = 'active-label-help'; return; }
   var label = labelMeta(event.event_key);
-  node.textContent = label ? displayedLabel(label.id) + ': ' + label.description + (label.active ? '' : ' (inactive)') + (label.scope === 'failure' ? ' · failure rollout only' : '') : 'Unregistered label ' + event.event_key + ': preserved unchanged. Register this ID or explicitly reassign before saving.';
-  node.className = 'active-label-help' + (!label || label.scope === 'failure' && !eligibleLabel(label, selectedRollout()) ? ' warning' : '');
+  node.textContent = label ? displayedLabel(label.id) + ': ' + label.description : 'Unregistered label ' + event.event_key + ': preserved unchanged. Register this ID or explicitly reassign before saving.';
+  node.className = 'active-label-help' + (!label ? ' warning' : '');
 }
 function normalizeLocalEvents() {
   state.events.forEach(function (event, index) {
@@ -673,12 +666,12 @@ function renderIntervals() {
 function addInterval(key) {
   var record = selectedRollout();
   var label = labelMeta(key);
-  if (!eligibleLabel(label, record)) { setAnnotationMessage('Label ' + key + ' is unavailable for this rollout.', 'error'); return; }
+  if (!eligibleLabel(label)) { setAnnotationMessage('Register label ' + key + ' in Settings before using it.', 'error'); return; }
   state.events.push({ event_key: label.id, start_frame: state.currentFrame, end_frame: state.currentFrame, notes: "" });
   state.activeEvent = state.events.length - 1; markDirty(); renderIntervals(); renderAnnotateTimeline();
 }
 function setActiveEventType(key) {
-  if (!eligibleLabel(labelMeta(key), selectedRollout())) { setAnnotationMessage('Label ' + key + ' is unavailable for this rollout.', 'error'); return; }
+  if (!eligibleLabel(labelMeta(key))) { setAnnotationMessage('Register label ' + key + ' in Settings before using it.', 'error'); return; }
   if (state.activeEvent == null || !state.events[state.activeEvent]) addInterval(key);
   else { state.events[state.activeEvent].event_key = Number(key); markDirty(); renderIntervals(); renderAnnotateTimeline(); }
 }
@@ -1028,18 +1021,12 @@ function renderLabelSettings() {
   var container = byId("labelRegistryRows");
   if (!container) return;
   var rows = state.labelDraft || [];
-  var existing = state.labels.map(function (label) { return label.id; });
   container.innerHTML = rows.map(function (label) {
-    var isNew = existing.indexOf(label.id) < 0;
     return '<div class="label-registry-row" data-label-id="' + label.id + '">'
       + '<div><span class="label-field-title">ID</span><strong class="label-id">' + label.id + '</strong></div>'
       + '<label><span>Name</span><input type="text" maxlength="64" data-field="name" value="' + escapeHtml(label.name) + '"></label>'
       + '<label><span>Description</span><textarea rows="2" maxlength="500" data-field="description">' + escapeHtml(label.description) + '</textarea></label>'
       + '<label><span>Color</span><input type="color" data-field="color" value="' + escapeHtml(label.color) + '"></label>'
-      + '<label><span>Eligibility</span>' + (isNew
-        ? '<select data-field="scope"><option value="all"' + (label.scope === 'all' ? ' selected' : '') + '>All</option><option value="failure"' + (label.scope === 'failure' ? ' selected' : '') + '>Failure only</option></select>'
-        : '<span class="label-scope-static">' + (label.scope === 'failure' ? 'Failure only' : 'All rollouts') + '</span>') + '</label>'
-      + '<label><span>Active</span><input type="checkbox" data-field="active"' + (label.active ? ' checked' : '') + '></label>'
       + '</div>';
   }).join('');
 }
@@ -1050,13 +1037,12 @@ function updateLabelDraft(event) {
   if (!field || !row || !state.labelDraft) return;
   var label = state.labelDraft.find(function (item) { return item.id === Number(row.dataset.labelId); });
   if (!label) return;
-  if (field === 'active') label[field] = Boolean(target.checked);
-  else if (['name', 'description', 'color', 'scope'].indexOf(field) >= 0) label[field] = target.value;
+  if (['name', 'description', 'color'].indexOf(field) >= 0) label[field] = target.value;
 }
 function addLabelDefinition() {
   if (!state.labelDraft) return;
   var next = Math.max(0, ...state.labelDraft.map(function (label) { return label.id; })) + 1;
-  state.labelDraft.push({ id: next, name: 'New label', description: '', color: '#64748b', scope: 'all', active: true });
+  state.labelDraft.push({ id: next, name: 'New label', description: '', color: '#64748b' });
   renderLabelSettings();
   var node = byId("labelRegistryMessage"); node.textContent = 'Configure the new ID and save. IDs are never reused.'; node.className = 'message';
 }
@@ -1171,8 +1157,8 @@ function bindEvents() {
   byId("annotateF6Finger").addEventListener("change", renderAnnotateF6Curve); byId("annotatePlay").addEventListener("click", togglePlay); byId("annotateStepBack").addEventListener("click", function () { seekFrame(state.currentFrame - 1); }); byId("annotateStepForward").addEventListener("click", function () { seekFrame(state.currentFrame + 1); }); byId("annotateFrameSlider").addEventListener("input", function (event) { seekFrame(event.target.value); });
   byId("annotateVideo").addEventListener("play", function () { byId("annotatePlay").textContent = "Pause"; }); byId("annotateVideo").addEventListener("pause", function () { byId("annotatePlay").textContent = "Play"; }); byId("annotateVideo").addEventListener("timeupdate", function () { var record = selectedRollout(); if (record) updateFrameUi(Math.round(byId("annotateVideo").currentTime * (Number(record.fps) || 30)), false); });
   byId("addInterval").addEventListener("click", function () {
-    var label = state.labels.find(function (item) { return eligibleLabel(item, selectedRollout()); });
-    if (label) addInterval(label.id); else setAnnotationMessage("No active labels for this rollout.", "error");
+    var label = state.labels[0];
+    if (label) addInterval(label.id); else setAnnotationMessage("No labels are defined.", "error");
   }); byId("saveIntervals").addEventListener("click", saveIntervals);
   byId("addLabelDefinition").addEventListener("click", addLabelDefinition);
   byId("saveLabelDefinitions").addEventListener("click", saveLabelDefinitions);

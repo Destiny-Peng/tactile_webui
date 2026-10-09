@@ -14,6 +14,7 @@ outputs/
 artifacts/
 
 # Experiment caches
+cache/
 *.pt
 *.pth
 *.npz

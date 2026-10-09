@@ -176,18 +176,38 @@ function populateTaskFilter() {
   }).join("");
   select.value = tasks.indexOf(current) >= 0 ? current : "all";
 }
+function rolloutOutcome(record) {
+  return String(record && (record.ground_truth_outcome || record.annotation && record.annotation.outcome_label) || "unknown").trim().toLowerCase();
+}
+function populateOutcomeFilter() {
+  var select = byId("annotateOutcomeFilter");
+  var previous = select.value || "all";
+  var expected = ["success", "failure"];
+  var extra = Array.from(new Set(state.rollouts.map(rolloutOutcome))).filter(function (outcome) {
+    return expected.indexOf(outcome) < 0 && outcome !== "unknown";
+  }).sort();
+  var outcomes = expected.concat(extra);
+  select.innerHTML = '<option value="all">All outcomes</option>' + outcomes.map(function (outcome) {
+    var label = outcome.replace(/_/g, " ").replace(/\b\w/g, function (match) { return match.toUpperCase(); });
+    return '<option value="' + escapeHtml(outcome) + '">' + escapeHtml(label) + '</option>';
+  }).join("");
+  select.value = outcomes.indexOf(previous) >= 0 ? previous : "all";
+}
 function filterRollouts() {
   var query = byId("annotateSearch").value.trim().toLowerCase();
   var task = byId("annotateTaskFilter").value;
+  var outcome = byId("annotateOutcomeFilter").value;
   var review = byId("annotateReviewFilter").value;
   state.filtered = state.rollouts.filter(function (record) {
     var haystack = [record.id, taskLabel(record), record.task_key, record.task_id, record.episode_index].join(" ").toLowerCase();
     return (!query || haystack.indexOf(query) >= 0)
       && (task === "all" || taskLabel(record) === task)
+      && (outcome === "all" || rolloutOutcome(record) === outcome)
       && (review === "all" || record.annotation_status === review);
   });
   byId("annotateVisibleCount").textContent = state.filtered.length;
   renderRolloutList();
+  updateNavigationButtons();
 }
 function renderRolloutList() {
   var container = byId("annotateRolloutList");
@@ -198,7 +218,8 @@ function renderRolloutList() {
   container.innerHTML = state.filtered.map(function (record) {
     var events = record.annotation_events || [];
     return '<button type="button" class="rollout-card' + (record.id === state.selectedId ? " active" : "") + '" data-rollout-id="' + escapeHtml(record.id) + '">'
-      + '<div class="badge-row">' + badge(record.annotation_status || "unreviewed", record.annotation_status || "")
+      + '<div class="badge-row">' + badge(rolloutOutcome(record), rolloutOutcome(record))
+      + badge(record.annotation_status || "unreviewed", record.annotation_status || "")
       + (events.length ? badge(events.length + " intervals", "") : "") + '</div>'
       + '<div class="rollout-title">' + escapeHtml(taskLabel(record)) + '</div>'
       + '<div class="rollout-meta"><span>' + escapeHtml(record.id) + '</span><span>' + escapeHtml(record.total_frames || "?") + 'f</span></div></button>';
@@ -247,12 +268,13 @@ function renderAnnotateCameras(record) {
 }
 function setRolloutSidebarCollapsed(collapsed) {
   state.sidebarCollapsed = Boolean(collapsed);
-  byId("annotateSidebar").parentElement.classList.toggle("sidebar-collapsed", state.sidebarCollapsed);
+  byId("annotateWorkspace").classList.toggle("sidebar-collapsed", state.sidebarCollapsed);
   var button = byId("toggleRolloutSidebar");
   button.textContent = state.sidebarCollapsed ? "›" : "‹";
-  button.title = state.sidebarCollapsed ? "Expand rollout list" : "Collapse rollout list";
+  button.title = state.sidebarCollapsed ? "Expand rollout queue" : "Collapse rollout queue";
+  button.setAttribute("aria-label", button.title);
   button.setAttribute("aria-expanded", String(!state.sidebarCollapsed));
-  try { sessionStorage.setItem("tactile.annotate.sidebarCollapsed", state.sidebarCollapsed ? "1" : "0"); } catch (_error) {}
+  try { localStorage.setItem("tactile.annotate.queueCollapsed", String(state.sidebarCollapsed)); } catch (_error) {}
 }
 function switchAnnotateCamera(camera) {
   var record = selectedRollout();
@@ -678,7 +700,7 @@ async function saveIntervals() {
     record.annotation_events = state.events.map(function (event) { return Object.assign({}, event); });
     record.annotation_status = state.events.length ? "complete" : "unreviewed";
     state.annotationTarget = payload.annotation_target || state.annotationTarget; state.dirty = false;
-    renderIntervals(); renderAnnotateTimeline(); renderRolloutList(); updateHeader();
+    renderIntervals(); renderAnnotateTimeline(); filterRollouts(); updateHeader();
     setAnnotationMessage("Saved to " + (state.annotationTarget || "annotation file"), "success");
   } catch (error) { setAnnotationMessage(error.message, "error"); }
   finally { byId("saveIntervals").disabled = false; }
@@ -695,7 +717,7 @@ async function loadRollouts() {
   var payload = await jsonRequest("/api/rollouts");
   state.rollouts = payload.rollouts || []; state.annotationSource = payload.annotation_source || null; state.annotationTarget = payload.annotation_target || null;
   state.labels = payload.labels || []; LABEL_KEYS = state.labels.map(function (label) { return label.id; });
-  populateTaskFilter(); filterRollouts(); updateHeader(); populateResultsRollouts();
+  populateTaskFilter(); populateOutcomeFilter(); filterRollouts(); updateHeader(); populateResultsRollouts();
   if (state.filtered.length) selectRollout(state.filtered[0].id);
 }
 
@@ -1139,7 +1161,7 @@ function initPerformanceObserver() {
 
 function bindEvents() {
   document.querySelectorAll(".nav-item").forEach(function (button) { button.addEventListener("click", function () { switchView(button.dataset.view); }); });
-  byId("annotateSearch").addEventListener("input", filterRollouts); byId("annotateTaskFilter").addEventListener("change", filterRollouts); byId("annotateReviewFilter").addEventListener("change", filterRollouts);
+  byId("annotateSearch").addEventListener("input", filterRollouts); byId("annotateTaskFilter").addEventListener("change", filterRollouts); byId("annotateOutcomeFilter").addEventListener("change", filterRollouts); byId("annotateReviewFilter").addEventListener("change", filterRollouts);
   byId("annotatePrevious").addEventListener("click", function () { navigateRollout(-1); }); byId("annotateNext").addEventListener("click", function () { navigateRollout(1); });
   byId("annotateCamera").addEventListener("click", function (event) {
     var button = event.target.closest("[data-camera]");
@@ -1185,7 +1207,11 @@ function bindEvents() {
 async function init() {
   bindEvents(); monitorVideo("annotateVideo", "annotate"); monitorVideo("resultsVideo", "results"); initPerformanceObserver();
   var requested = (location.hash || "#annotate").slice(1); if (!byId("view-" + requested)) requested = "annotate"; switchView(requested, false);
-  try { setRolloutSidebarCollapsed(sessionStorage.getItem("tactile.annotate.sidebarCollapsed") === "1"); } catch (_error) { setRolloutSidebarCollapsed(false); }
+  try {
+    var collapsed = localStorage.getItem("tactile.annotate.queueCollapsed");
+    if (collapsed == null) collapsed = sessionStorage.getItem("tactile.annotate.sidebarCollapsed") === "1" ? "true" : "false";
+    setRolloutSidebarCollapsed(collapsed === "true");
+  } catch (_error) { setRolloutSidebarCollapsed(false); }
   try {
     var settingsPayload = await jsonRequest("/api/settings"); state.settings = settingsPayload.settings || {}; state.annotationSource = settingsPayload.annotation_source || null; state.annotationTarget = settingsPayload.annotation_target || null; applyTheme(state.settings.theme); await loadRollouts(); await checkHealth();
   } catch (error) { setGlobalStatus(false, error.message); byId("datasetStatus").textContent = "Dataset unavailable"; }

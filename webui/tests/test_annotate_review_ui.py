@@ -18,7 +18,28 @@ class AnnotateReviewUITests(unittest.TestCase):
         self.assertIn('id="annotateNext"', self.html)
         self.assertIn("setRolloutSidebarCollapsed", self.js)
         self.assertIn(".review-workspace.sidebar-collapsed", self.css)
-        self.assertIn(".review-workspace .review-stage { grid-column: 2; }", self.css)
+        self.assertIn(".review-workspace .review-stage { grid-column: 2; min-width: 0; }", self.css)
+        self.assertIn("grid-template-columns: 2.75rem minmax(0,1fr)", self.css)
+        self.assertIn('.queue-panel > :not(.review-queue-toggle)', self.css)
+        self.assertIn('localStorage.setItem("tactile.annotate.queueCollapsed"', self.js)
+        queue = self.html.split('<aside id="annotateSidebar"')[1].split('</aside>')[0]
+        self.assertIn('id="toggleRolloutSidebar"', queue)
+        self.assertEqual(self.html.count('id="toggleRolloutSidebar"'), 1)
+        task = self.html.split('<section class="task-header">')[1].split('</section>')[0]
+        self.assertNotIn('toggleRolloutSidebar', task)
+
+    def test_lf3r_outcome_filter_is_present_and_uses_rollout_result(self):
+        self.assertIn('id="annotateOutcomeFilter"', self.html)
+        self.assertIn('<option value="success">Success</option>', self.html)
+        self.assertIn('<option value="failure">Failure</option>', self.html)
+        self.assertIn('id="annotateReviewFilter"', self.html)
+        self.assertIn('id="annotateTaskFilter"', self.html)
+        self.assertIn('function rolloutOutcome(record)', self.js)
+        self.assertIn('record.ground_truth_outcome', self.js)
+        self.assertIn('(outcome === "all" || rolloutOutcome(record) === outcome)', self.js)
+        self.assertIn('populateOutcomeFilter(); filterRollouts()', self.js)
+        self.assertIn('byId("annotateOutcomeFilter").addEventListener("change", filterRollouts)', self.js)
+
 
     def test_header_badges_removed_and_camera_buttons_preserve_frame(self):
         self.assertNotIn('id="annotateBadges"', self.html)

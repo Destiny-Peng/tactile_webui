@@ -1698,18 +1698,31 @@ body.theme-dark .label-registry-row { border-color: var(--line); background: var
 }
 
 
-/* Annotate workspace — narrow labels panel and a collapsible rollout queue. */
+/* LF3R review-style queue rail: collapse handle stays inside the sidebar. */
 .review-workspace { transition: grid-template-columns .16s ease; }
-.review-workspace.sidebar-collapsed { grid-template-columns: 0 minmax(0,1fr); }
-.review-workspace.sidebar-collapsed .queue-panel { display: none; }
-.review-workspace .review-stage { grid-column: 2; }
-.review-workspace.sidebar-collapsed .review-stage { min-width: 0; }
+.review-workspace .review-stage { grid-column: 2; min-width: 0; }
+.review-workspace .queue-panel { position: relative; }
+.review-workspace .queue-panel > .panel-heading { padding-right: 1.5rem; }
+.review-queue-toggle { display: none; }
+@media (min-width: 851px) {
+  .review-queue-toggle {
+    position: absolute; top: 1.15rem; right: .2rem; z-index: 8;
+    display: grid; width: 1.7rem; height: 2.8rem; min-height: 0;
+    padding: 0; place-items: center; border-radius: 8px;
+    color: var(--muted); background: var(--surface-raised);
+    border: 1px solid var(--line); box-shadow: var(--shadow-card);
+    font-size: 1.1rem; line-height: 1;
+  }
+  .review-queue-toggle:hover { color: var(--text); background: var(--surface-raised); }
+  .review-workspace.sidebar-collapsed { grid-template-columns: 2.75rem minmax(0,1fr); }
+  .review-workspace.sidebar-collapsed .queue-panel { display: block; padding-inline: .45rem; }
+  .review-workspace.sidebar-collapsed .queue-panel > :not(.review-queue-toggle) { display: none !important; }
+}
 .review-content { grid-template-columns: minmax(0,1.7fr) minmax(18rem,.72fr); }
 .media-column { padding: 20px 20px 26px; }
 .annotation-panel { padding: 17px 16px; }
-.task-title-row { display: flex; align-items: center; gap: 9px; }
-.task-title-row h2 { margin-top: 0; }
-.sidebar-toggle { width: 32px; height: 32px; min-height: 32px; padding: 0; flex: 0 0 auto; font-size: 1.25rem; line-height: 1; }
+/* Task title remains a pure content header; queue controls live on the queue rail. */
+.task-header h2 { margin-top: 0; }
 .annotation-label-guide { gap: 3px; margin: 9px 0 5px; }
 .annotation-label-definition { font-size: .59rem; }
 .annotation-label-definition .label-explanation { display: none; }
@@ -1756,14 +1769,11 @@ body.theme-dark .label-registry-row { border-color: var(--line); background: var
 .tactile-f6-legend span:nth-child(6)::before { background: #76919f; }
 body.theme-dark .camera-view-button.is-active { background: #1b3156; color: #b7ceff; border-color: #456ca8; }
 body.theme-dark .annotate-tactile-finger { background: var(--surface-raised); }
-@media (max-width: 1180px) {
-  .review-content { grid-template-columns: 1fr; }
-  .review-workspace.sidebar-collapsed { grid-template-columns: 0 minmax(0,1fr); }
+@media (min-width: 1101px) and (max-width: 1180px) {
+  .review-content { grid-template-columns: minmax(0, 1.7fr) minmax(18rem, .72fr); }
 }
 @media (max-width: 850px) {
   .review-workspace .review-stage { grid-column: 1; }
-  .review-workspace.sidebar-collapsed { grid-template-columns: 1fr; }
-  .review-workspace.sidebar-collapsed .queue-panel { display: none; }
 }
 @media (max-width: 600px) {
   .annotate-tactile-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
@@ -1779,3 +1789,18 @@ body.theme-dark .annotate-tactile-finger { background: var(--surface-raised); }
 .video-transcode-choice strong { font-size:.72rem; overflow-wrap:anywhere; }
 .video-transcode-choice small { font-size:.62rem; color:var(--muted); overflow-wrap:anywhere; }
 .video-transcode-log { min-height:80px; max-height:230px; padding:12px; margin-top:10px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; border:1px solid var(--line); border-radius:8px; background:var(--surface-raised); color:var(--text); font-size:.66rem; line-height:1.55; }
+
+/* LF3R-style review queue filters and outcome distinctions. */
+.queue-panel .filter-grid label:first-child { grid-column: 1 / -1; }
+.queue-panel .filter-grid label { min-width: 0; }
+.queue-panel .filter-grid select { min-width: 0; text-overflow: ellipsis; }
+.rollout-card .badge.success { color: #23794e; background: #e8f7ee; border-color: #c3e4d0; }
+.rollout-card .badge.failure { color: #ae4646; background: #fff0f0; border-color: #f0cccc; }
+.video-view-controls { align-items: center; justify-content: space-between; gap: 9px 14px; flex-wrap: wrap; }
+.video-frame-status { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-left: auto; }
+.video-frame-status .mono { margin-bottom: 0; }
+.video-frame-status .health-pill { margin: 0; }
+@media (max-width: 850px) {
+  .review-workspace .queue-panel > .panel-heading { padding-right: 0; }
+  .video-frame-status { margin-left: 0; }
+}

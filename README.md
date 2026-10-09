@@ -65,13 +65,19 @@ The script copies the exported fail-recovery dataset into `datasets/failrecovery
 
 ## Run the WebUI
 
-The WebUI backend uses only the Python standard library.
+The WebUI backend uses only the Python standard library. From the repository root:
 
 ```bash
-python webui/server.py --root . --host 127.0.0.1 --port 8765
+./start.sh
 ```
 
-Then open `http://127.0.0.1:8765/`.
+The launcher works from any working directory, uses `.venv/bin/python` when available (otherwise the current `python3`), and runs the server in the foreground. To use a different interpreter or bind address/port:
+
+```bash
+WEBUI_PYTHON=/path/to/python ./start.sh --host 0.0.0.0 --port 8766
+```
+
+Then open `http://127.0.0.1:8765/` for the default host/port. Runtime logs remain under `logs/webui/server/` and `logs/webui/client/`.
 
 The synchronized tactile diagnostic viewer remains directly available at `http://127.0.0.1:8765/tactile`. The main **Results** page is now the online-detection review surface.
 

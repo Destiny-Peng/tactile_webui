@@ -27,8 +27,11 @@ jobs:
           node-version: '22'
       - name: Python syntax
         run: python -m compileall -q webui tools/sharpa_tactile tools/export_failrecovery_media.py tools/plot_failrecovery_tactile.py
-      - name: Shell syntax
-        run: bash -n tools/migrate_from_lf3r.sh
+      - name: Shell syntax and launcher smoke test
+        run: |
+          bash -n tools/migrate_from_lf3r.sh
+          bash -n start.sh
+          (cd /tmp && "$GITHUB_WORKSPACE/start.sh" --help >/dev/null)
       - name: JavaScript syntax
         run: |
           node --check webui/static/shell.js

@@ -407,6 +407,8 @@ class TactileApplication:
             raise KeyError("Unknown rollout")
         total_frames = int(record.get("total_frames") or 0)
         normalized: list[dict[str, Any]] = []
+        inactive_seen: Counter[int] = Counter()
+        existing_label_counts: Counter[int] | None = None
         for index, raw in enumerate(events):
             if not isinstance(raw, dict):
                 raise ValueError(f"event {index + 1} must be an object")
@@ -421,8 +423,15 @@ class TactileApplication:
                 raise ValueError(f"event {index + 1} has unregistered event_key {key}; register it before saving")
             if label["scope"] == "failure" and record.get("ground_truth_outcome") != "failure":
                 raise ValueError(f"label {key} requires authoritative failure outcome")
-            if not label["active"] and not any(int(item.get("event_key", -1)) == key for item in self.annotations_by_rollout().get(rollout_id, [])):
-                raise ValueError(f"label {key} is inactive and cannot be used for new intervals")
+            if not label["active"]:
+                if existing_label_counts is None:
+                    existing_label_counts = Counter(
+                        int(item["event_key"])
+                        for item in self.annotations_by_rollout().get(rollout_id, [])
+                    )
+                inactive_seen[key] += 1
+                if inactive_seen[key] > existing_label_counts[key]:
+                    raise ValueError(f"label {key} is inactive and cannot be used for new intervals")
             if start < 0 or end < start:
                 raise ValueError(f"event {index + 1} requires 0 <= start <= end")
             if total_frames and end >= total_frames:

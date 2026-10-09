@@ -832,7 +832,11 @@ class MultiTactileService:
         return self._reader(rollout_id).image(rollout_id, finger, event_id, kind)
 
     def cache_stats(self) -> dict[str, Any]:
-        return {
-            "readers": len(self._readers),
-            "sources": [reader.cache_stats() for reader in self._readers],
-        }
+        sources = [reader.cache_stats() for reader in self._readers]
+        aggregate: dict[str, Any] = {"readers": len(sources), "sources": sources}
+        for cache in ("episodes", "series", "sprites"):
+            aggregate[cache] = {
+                field: sum(int(source.get(cache, {}).get(field, 0)) for source in sources)
+                for field in ("size", "limit", "hits", "misses", "evictions")
+            }
+        return aggregate

@@ -12,6 +12,8 @@ var state = {
   activeEvent: null,
   dirty: false,
   settings: null,
+  labels: [],
+  labelDraft: null,
   annotationSource: null,
   annotationTarget: null,
   videoGeneration: 0,
@@ -58,6 +60,10 @@ function isTypingTarget(target) {
   if (target.isContentEditable) return true;
   return ["INPUT", "TEXTAREA", "SELECT"].indexOf(target.tagName) >= 0;
 }
+function labelMeta(id) { return state.labels.find(function (row) { return row.id === Number(id); }) || null; }
+function labelName(id) { var meta = labelMeta(id); return meta ? meta.name : "Unknown " + id; }
+function eligibleLabel(label, record) { return Boolean(label && label.active && (label.scope !== "failure" || record && record.ground_truth_outcome === "failure")); }
+function displayedLabel(id) { return id + " · " + labelName(id); }
 function badge(label, cssClass) {
   return '<span class="badge ' + escapeHtml(cssClass || "") + '">' + escapeHtml(label) + "</span>";
 }
@@ -229,15 +235,16 @@ function renderPrecisionTimeline(containerId, events, totalFrames, currentFrame,
     html += '<i class="timeline-gridline" style="left:' + (ratio * 100) + '%"></i>';
     html += '<span class="timeline-axis-label" style="left:' + (ratio * 100) + '%">' + Math.round((total - 1) * ratio) + '</span>';
   });
-  var lanes = Array.isArray(labelKeys) ? labelKeys : LABEL_KEYS;
+  var lanes = Array.isArray(labelKeys) ? labelKeys : Array.from(new Set(LABEL_KEYS.concat((events || []).map(function (event) { return Number(event.event_key); })))).sort(function (a, b) { return a - b; });
   lanes.forEach(function (key) {
-    html += '<div class="timeline-lane" data-label-key="' + key + '"><span class="timeline-lane-label">' + key + '</span>';
+    var meta = labelMeta(key);
+    html += '<div class="timeline-lane" data-label-key="' + key + '" title="' + escapeHtml(meta ? meta.name + ": " + meta.description : "Unregistered label " + key) + '"><span class="timeline-lane-label">' + key + '</span>';
     (events || []).forEach(function (event, index) {
       if (Number(event.event_key) !== key) return;
       var left = timelinePercent(event.start_frame, total);
       var right = timelinePercent(event.end_frame, total);
       var width = Math.max(.45, right - left + 100 / total);
-      html += '<div class="timeline-segment label-' + key + (index === activeIndex ? ' active' : '') + '" data-event-index="' + index + '" style="left:' + left + '%;width:' + Math.min(width, 100 - left) + '%"><span>' + key + '</span></div>';
+      html += '<div class="timeline-segment label-' + key + (index === activeIndex ? ' active' : '') + '" data-event-index="' + index + '" style="left:' + left + '%;width:' + Math.min(width, 100 - left) + '%;' + (meta ? 'background:' + meta.color + ';' : '') + '"><span>' + key + '</span></div>';
     });
     html += '</div>';
   });
@@ -462,12 +469,39 @@ function togglePlay() {
   if (video.paused || video.ended) video.play().catch(function () {}); else video.pause();
 }
 function eventOptions(selected) {
-  return LABEL_KEYS.map(function (key) { return '<option value="' + key + '"' + (Number(selected) === key ? " selected" : "") + '>' + key + '</option>'; }).join("");
+  var record = selectedRollout();
+  var options = state.labels.filter(function (label) {
+    return eligibleLabel(label, record) || label.id === Number(selected);
+  }).map(function (label) {
+    return '<option value="' + label.id + '"' + (label.id === Number(selected) ? ' selected' : '') + '>' + escapeHtml(displayedLabel(label.id)) + (label.active ? '' : ' (inactive)') + '</option>';
+  });
+  if (!labelMeta(selected)) options.unshift('<option selected value="' + escapeHtml(selected) + '">Unregistered label ' + escapeHtml(selected) + '</option>');
+  return options.join('');
+}
+function renderAnnotationLabelGuide() {
+  var node = byId("annotationLabelGuide");
+  if (!node) return;
+  var record = selectedRollout();
+  node.innerHTML = state.labels.filter(function (label) {
+    return label.active || state.events.some(function (event) { return Number(event.event_key) === label.id; });
+  }).map(function (label) {
+    var eligible = eligibleLabel(label, record);
+    return '<div class="annotation-label-definition' + (eligible ? '' : ' ineligible') + '" title="' + escapeHtml(label.description) + '"><i class="label-mark" style="background:' + label.color + '"></i><strong>' + label.id + ' · ' + escapeHtml(label.name) + '</strong><span class="label-explanation">' + escapeHtml(label.description) + (label.scope === 'failure' ? ' · failure only' : '') + (label.active ? '' : ' · inactive') + '</span></div>';
+  }).join('');
+}
+function renderActiveLabelHelp() {
+  var node = byId("activeLabelHelp"); if (!node) return;
+  var event = state.activeEvent == null ? null : state.events[state.activeEvent];
+  if (!event) { node.textContent = 'Select a label to see its definition.'; node.className = 'active-label-help'; return; }
+  var label = labelMeta(event.event_key);
+  node.textContent = label ? displayedLabel(label.id) + ': ' + label.description + (label.active ? '' : ' (inactive)') + (label.scope === 'failure' ? ' · failure rollout only' : '') : 'Unregistered label ' + event.event_key + ': preserved unchanged. Register this ID or explicitly reassign before saving.';
+  node.className = 'active-label-help' + (!label || label.scope === 'failure' && !eligibleLabel(label, selectedRollout()) ? ' warning' : '');
 }
 function normalizeLocalEvents() {
   state.events.forEach(function (event, index) {
     event.event_index = index;
-    event.event_key = LABEL_KEYS.indexOf(Number(event.event_key)) >= 0 ? Number(event.event_key) : 1;
+    // Unknown historical event IDs must never be silently rewritten to label 1.
+    event.event_key = Number(event.event_key);
     event.start_frame = clampFrame(event.start_frame);
     event.end_frame = clampFrame(event.end_frame);
     if (event.end_frame < event.start_frame) event.end_frame = event.start_frame;
@@ -478,7 +512,7 @@ function renderIntervals() {
   var container = byId("intervalList");
   if (!state.events.length) {
     container.innerHTML = '<div class="muted" style="padding:18px 3px;font-size:.64rem">No intervals yet. Add one at the current frame.</div>';
-    renderAnnotateTimeline();
+    renderAnnotateTimeline(); renderAnnotationLabelGuide(); renderActiveLabelHelp();
     return;
   }
   container.innerHTML = state.events.map(function (event, index) {
@@ -493,7 +527,7 @@ function renderIntervals() {
     var index = Number(row.dataset.eventIndex);
     row.addEventListener("click", function (event) { if (event.target.closest("input,select,button")) return; state.activeEvent = index; renderIntervals(); renderAnnotateTimeline(); });
     row.addEventListener("focusin", function () { state.activeEvent = index; container.querySelectorAll(".interval-row").forEach(function (item) { item.classList.toggle("active", Number(item.dataset.eventIndex) === index); }); renderAnnotateTimeline(); });
-    row.querySelector(".event-type").addEventListener("change", function (event) { event.stopPropagation(); state.activeEvent = index; state.events[index].event_key = Number(event.target.value); markDirty(); renderAnnotateTimeline(); });
+    row.querySelector(".event-type").addEventListener("change", function (event) { event.stopPropagation(); state.activeEvent = index; state.events[index].event_key = Number(event.target.value); markDirty(); renderIntervals(); renderAnnotateTimeline(); });
     row.querySelector(".event-start").addEventListener("change", function (event) { event.stopPropagation(); state.activeEvent = index; state.events[index].start_frame = clampFrame(event.target.value); if (state.events[index].end_frame < state.events[index].start_frame) state.events[index].end_frame = state.events[index].start_frame; markDirty(); renderIntervals(); renderAnnotateTimeline(); });
     row.querySelector(".event-end").addEventListener("change", function (event) { event.stopPropagation(); state.activeEvent = index; state.events[index].end_frame = Math.max(state.events[index].start_frame, clampFrame(event.target.value)); markDirty(); renderIntervals(); renderAnnotateTimeline(); });
     row.querySelector(".use-start").addEventListener("click", function (event) { event.stopPropagation(); state.activeEvent = index; state.events[index].start_frame = state.currentFrame; if (state.events[index].end_frame < state.currentFrame) state.events[index].end_frame = state.currentFrame; markDirty(); renderIntervals(); renderAnnotateTimeline(); });
@@ -502,12 +536,17 @@ function renderIntervals() {
     row.querySelector(".jump-end").addEventListener("click", function (event) { event.stopPropagation(); seekFrame(state.events[index].end_frame); });
     row.querySelector(".delete-event").addEventListener("click", function (event) { event.stopPropagation(); state.events.splice(index, 1); state.activeEvent = state.events.length ? Math.min(index, state.events.length - 1) : null; markDirty(); renderIntervals(); renderAnnotateTimeline(); });
   });
+  renderAnnotationLabelGuide(); renderActiveLabelHelp();
 }
 function addInterval(key) {
-  state.events.push({ event_key: Number(key) || 1, start_frame: state.currentFrame, end_frame: state.currentFrame, notes: "" });
+  var record = selectedRollout();
+  var label = labelMeta(key);
+  if (!eligibleLabel(label, record)) { setAnnotationMessage('Label ' + key + ' is unavailable for this rollout.', 'error'); return; }
+  state.events.push({ event_key: label.id, start_frame: state.currentFrame, end_frame: state.currentFrame, notes: "" });
   state.activeEvent = state.events.length - 1; markDirty(); renderIntervals(); renderAnnotateTimeline();
 }
 function setActiveEventType(key) {
+  if (!eligibleLabel(labelMeta(key), selectedRollout())) { setAnnotationMessage('Label ' + key + ' is unavailable for this rollout.', 'error'); return; }
   if (state.activeEvent == null || !state.events[state.activeEvent]) addInterval(key);
   else { state.events[state.activeEvent].event_key = Number(key); markDirty(); renderIntervals(); renderAnnotateTimeline(); }
 }
@@ -545,6 +584,7 @@ function navigateRollout(delta) {
 async function loadRollouts() {
   var payload = await jsonRequest("/api/rollouts");
   state.rollouts = payload.rollouts || []; state.annotationSource = payload.annotation_source || null; state.annotationTarget = payload.annotation_target || null;
+  state.labels = payload.labels || []; LABEL_KEYS = state.labels.map(function (label) { return label.id; });
   populateTaskFilter(); filterRollouts(); updateHeader(); populateResultsRollouts();
   if (state.filtered.length) selectRollout(state.filtered[0].id);
 }
@@ -610,7 +650,8 @@ function renderResultsLabelFilters() {
   var visible = state.results.visibleAnnotationLabels || [];
   container.innerHTML = '<button type="button" class="label-filter-chip' + (visible.length === labels.length ? ' active' : '') + '" data-label-filter="all">All</button>'
     + labels.map(function (key) {
-      return '<button type="button" class="label-filter-chip label-' + key + (visible.indexOf(key) >= 0 ? ' active' : '') + '" data-label-filter="' + key + '">' + key + '</button>';
+      var label = labelMeta(key); var active = visible.indexOf(key) >= 0;
+      return '<button type="button" class="label-filter-chip' + (active ? ' active' : '') + '" data-label-filter="' + key + '"' + (label && active ? ' style="background:' + label.color + ';border-color:' + label.color + '"' : '') + ' title="' + escapeHtml(label ? label.description : 'Unregistered historical label') + '">' + escapeHtml(displayedLabel(key)) + '</button>';
     }).join("");
   container.querySelectorAll("[data-label-filter]").forEach(function (button) {
     button.addEventListener("click", function () {
@@ -729,7 +770,7 @@ async function loadAnalysis() {
   try {
     var data = await jsonRequest("/api/analysis");
     cards.innerHTML = [["Rollouts",data.rollouts],["Annotated",data.reviewed_rollouts],["Coverage",formatPercent(data.coverage)],["Intervals",data.events]].map(function (item) { return '<div class="metric-card"><div class="eyebrow">' + escapeHtml(item[0]) + '</div><div class="metric-value">' + escapeHtml(item[1]) + '</div></div>'; }).join("");
-    byId("eventAnalysisTable").innerHTML = '<table class="data-table"><thead><tr><th>Label</th><th>Count</th><th>Mean duration</th></tr></thead><tbody>' + (data.event_types || []).map(function (row) { return '<tr><td><strong>' + row.event_key + '</strong></td><td>' + row.count + '</td><td>' + (row.mean_duration_frames == null ? '—' : row.mean_duration_frames.toFixed(1) + ' f') + '</td></tr>'; }).join("") + '</tbody></table>';
+    byId("eventAnalysisTable").innerHTML = '<table class="data-table"><thead><tr><th>Label</th><th>Count</th><th>Mean duration</th></tr></thead><tbody>' + (data.event_types || []).map(function (row) { return '<tr><td><strong>' + row.event_key + ' · ' + escapeHtml(row.name || labelName(row.event_key)) + '</strong><div class="muted">' + escapeHtml(row.description || '') + '</div></td><td>' + row.count + '</td><td>' + (row.mean_duration_frames == null ? '—' : row.mean_duration_frames.toFixed(1) + ' f') + '</td></tr>'; }).join("") + '</tbody></table>';
     byId("taskAnalysisTable").innerHTML = '<table class="data-table"><thead><tr><th>Task</th><th>Rollouts</th><th>Annotated</th><th>Coverage</th><th>Intervals</th></tr></thead><tbody>' + (data.tasks || []).map(function (row) { return '<tr><td>' + escapeHtml(row.task) + '</td><td>' + row.rollouts + '</td><td>' + row.reviewed + '</td><td>' + formatPercent(row.rollouts ? row.reviewed / row.rollouts : 0) + '</td><td>' + row.events + '</td></tr>'; }).join("") + '</tbody></table>';
   } catch (error) { cards.innerHTML = '<div class="metric-card"><span class="message error">' + escapeHtml(error.message) + '</span></div>'; }
 }
@@ -741,11 +782,84 @@ async function loadRuns() {
     container.innerHTML = runs.map(function (run) { return '<div class="run-row"><div><div class="run-path">' + escapeHtml(run.path) + '</div><div class="muted" style="font-size:.57rem;margin-top:3px">' + escapeHtml(formatDate(run.modified_at)) + '</div></div><div class="run-markers">' + (run.markers || []).map(function (marker) { return badge(marker, ""); }).join("") + '</div><span class="badge">tactile</span></div>'; }).join("");
   } catch (error) { container.innerHTML = '<div class="message error">' + escapeHtml(error.message) + '</div>'; }
 }
+function renderLabelSettings() {
+  var container = byId("labelRegistryRows");
+  if (!container) return;
+  var rows = state.labelDraft || [];
+  var existing = state.labels.map(function (label) { return label.id; });
+  container.innerHTML = rows.map(function (label) {
+    var isNew = existing.indexOf(label.id) < 0;
+    return '<div class="label-registry-row" data-label-id="' + label.id + '">'
+      + '<div><span class="label-field-title">ID</span><strong class="label-id">' + label.id + '</strong></div>'
+      + '<label><span>Name</span><input type="text" maxlength="64" data-field="name" value="' + escapeHtml(label.name) + '"></label>'
+      + '<label><span>Description</span><textarea rows="2" maxlength="500" data-field="description">' + escapeHtml(label.description) + '</textarea></label>'
+      + '<label><span>Color</span><input type="color" data-field="color" value="' + escapeHtml(label.color) + '"></label>'
+      + '<label><span>Eligibility</span>' + (isNew
+        ? '<select data-field="scope"><option value="all"' + (label.scope === 'all' ? ' selected' : '') + '>All</option><option value="failure"' + (label.scope === 'failure' ? ' selected' : '') + '>Failure only</option></select>'
+        : '<span class="label-scope-static">' + (label.scope === 'failure' ? 'Failure only' : 'All rollouts') + '</span>') + '</label>'
+      + '<label><span>Active</span><input type="checkbox" data-field="active"' + (label.active ? ' checked' : '') + '></label>'
+      + '</div>';
+  }).join('');
+}
+function updateLabelDraft(event) {
+  var target = event.target;
+  var field = target && target.dataset && target.dataset.field;
+  var row = target && target.closest && target.closest('[data-label-id]');
+  if (!field || !row || !state.labelDraft) return;
+  var label = state.labelDraft.find(function (item) { return item.id === Number(row.dataset.labelId); });
+  if (!label) return;
+  if (field === 'active') label[field] = Boolean(target.checked);
+  else if (['name', 'description', 'color', 'scope'].indexOf(field) >= 0) label[field] = target.value;
+}
+function addLabelDefinition() {
+  if (!state.labelDraft) return;
+  var next = Math.max(0, ...state.labelDraft.map(function (label) { return label.id; })) + 1;
+  state.labelDraft.push({ id: next, name: 'New label', description: '', color: '#64748b', scope: 'all', active: true });
+  renderLabelSettings();
+  var node = byId("labelRegistryMessage"); node.textContent = 'Configure the new ID and save. IDs are never reused.'; node.className = 'message';
+}
+async function loadLabelSettings() {
+  try {
+    var data = await jsonRequest('/api/labels');
+    state.labels = data.labels || [];
+    LABEL_KEYS = state.labels.map(function (label) { return label.id; });
+    state.labelDraft = state.labels.map(function (label) { return Object.assign({}, label); });
+    renderLabelSettings();
+  } catch (error) {
+    byId('labelRegistryRows').innerHTML = '<div class="message error">' + escapeHtml(error.message) + '</div>';
+  }
+}
+async function saveLabelDefinitions() {
+  if (!state.labelDraft) return;
+  var button = byId('saveLabelDefinitions'), message = byId('labelRegistryMessage');
+  button.disabled = true;
+  try {
+    var data = await jsonRequest('/api/labels', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ schema_version: 1, dataset: 'failrecovery', labels: state.labelDraft })
+    });
+    state.labels = data.labels || [];
+    LABEL_KEYS = state.labels.map(function (label) { return label.id; });
+    state.labelDraft = state.labels.map(function (label) { return Object.assign({}, label); });
+    renderLabelSettings();
+    if (selectedRollout()) { renderIntervals(); renderAnnotateTimeline(); }
+    if (resultRollout()) { renderResultsLabelFilters(); renderResultsAnnotationTimeline(); }
+    message.textContent = 'Label definitions saved. Event IDs and saved intervals are unchanged.';
+    message.className = 'message success';
+  } catch (error) {
+    message.textContent = error.message;
+    message.className = 'message error';
+  } finally {
+    button.disabled = false;
+  }
+}
+
 async function loadSettings() {
   try {
     var payload = await jsonRequest("/api/settings"); var settings = payload.settings || {}; state.settings = settings; applyTheme(settings.theme);
     byId("settingsSourceRoot").value = settings.source_project_root || "."; byId("settingsManifest").value = payload.source_project_root_resolved ? payload.source_project_root_resolved + "/" + (payload.manifest_path || "") : (payload.manifest_path || "");
     byId("settingsAnnotations").value = settings.annotations_path || ""; byId("settingsSeedGlob").value = settings.annotation_seed_glob || ""; byId("settingsRunsRoot").value = settings.runs_root || ""; byId("settingsCamera").value = settings.default_camera || "cam_high"; byId("settingsKind").value = settings.default_tactile_kind || "deform"; byId("settingsTheme").value = settings.theme || "light"; byId("settingsSource").textContent = payload.annotation_source || "None";
+    await loadLabelSettings();
   } catch (error) { var node = byId("settingsMessage"); node.textContent = error.message; node.className = "message error"; }
 }
 async function saveSettings(event) {
@@ -809,7 +923,14 @@ function bindEvents() {
   byId("annotatePrevious").addEventListener("click", function () { navigateRollout(-1); }); byId("annotateNext").addEventListener("click", function () { navigateRollout(1); });
   byId("annotateCamera").addEventListener("change", function () { state.tactileSeries = null; state.tactileSeriesKey = ""; state.tactileSeriesPromise = null; state.tactileAppliedKey = ""; state.tactilePendingFrame = null; state.tactileGeneration += 1; loadAnnotateVideo(); seekFrame(0); }); byId("annotatePlay").addEventListener("click", togglePlay); byId("annotateStepBack").addEventListener("click", function () { seekFrame(state.currentFrame - 1); }); byId("annotateStepForward").addEventListener("click", function () { seekFrame(state.currentFrame + 1); }); byId("annotateFrameSlider").addEventListener("input", function (event) { seekFrame(event.target.value); });
   byId("annotateVideo").addEventListener("play", function () { byId("annotatePlay").textContent = "Pause"; }); byId("annotateVideo").addEventListener("pause", function () { byId("annotatePlay").textContent = "Play"; }); byId("annotateVideo").addEventListener("timeupdate", function () { var record = selectedRollout(); if (record) updateFrameUi(Math.round(byId("annotateVideo").currentTime * (Number(record.fps) || 30)), false); });
-  byId("addInterval").addEventListener("click", function () { addInterval(1); }); byId("saveIntervals").addEventListener("click", saveIntervals);
+  byId("addInterval").addEventListener("click", function () {
+    var label = state.labels.find(function (item) { return eligibleLabel(item, selectedRollout()); });
+    if (label) addInterval(label.id); else setAnnotationMessage("No active labels for this rollout.", "error");
+  }); byId("saveIntervals").addEventListener("click", saveIntervals);
+  byId("addLabelDefinition").addEventListener("click", addLabelDefinition);
+  byId("saveLabelDefinitions").addEventListener("click", saveLabelDefinitions);
+  byId("labelRegistryRows").addEventListener("input", updateLabelDraft);
+  byId("labelRegistryRows").addEventListener("change", updateLabelDraft);
   byId("resultsSource").addEventListener("change", loadResultsCurve); byId("resultsRollout").addEventListener("change", loadResultsCurve); byId("resultsCamera").addEventListener("change", function () { loadResultsVideo(); seekResultsFrame(0); }); byId("refreshResults").addEventListener("click", function () { loadResultsSources(true); }); byId("resultsPlay").addEventListener("click", toggleResultsPlay); byId("resultsStepBack").addEventListener("click", function () { seekResultsFrame(state.results.currentFrame - 1); }); byId("resultsStepForward").addEventListener("click", function () { seekResultsFrame(state.results.currentFrame + 1); }); byId("resultsFrameSlider").addEventListener("input", function (event) { seekResultsFrame(event.target.value); }); byId("resultsVideo").addEventListener("play", function () { byId("resultsPlay").textContent = "Pause"; }); byId("resultsVideo").addEventListener("pause", function () { byId("resultsPlay").textContent = "Play"; }); byId("resultsVideo").addEventListener("timeupdate", function () { var record = resultRollout(); if (record) updateResultsFrame(Math.round(byId("resultsVideo").currentTime * (Number(record.fps) || 30))); });
   byId("refreshRuns").addEventListener("click", loadRuns); byId("refreshAnalysis").addEventListener("click", loadAnalysis); byId("settingsForm").addEventListener("submit", saveSettings); byId("refreshDiagnostics").addEventListener("click", loadDiagnostics);
   window.addEventListener("beforeunload", function (event) { flushTelemetry(); if (state.dirty) { event.preventDefault(); event.returnValue = ""; } });

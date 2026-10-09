@@ -27,10 +27,12 @@ from urllib.parse import parse_qs, unquote, urlparse
 try:  # package import for tests
     from .monitoring import WebUIMonitor
     from .results_service import OnlineResultsService
+    from .label_registry import LabelRegistry
     from .tactile_service import FailRecoveryTactileService
 except ImportError:  # direct ``python webui/server.py`` execution
     from monitoring import WebUIMonitor
     from results_service import OnlineResultsService
+    from label_registry import LabelRegistry
     from tactile_service import FailRecoveryTactileService
 
 
@@ -53,6 +55,7 @@ class TactileApplication:
         self.static_root = (Path(__file__).resolve().parent / "static").resolve()
         self.settings_path = self.root / ".tactile_webui" / "settings.json"
         self._settings = self._load_settings()
+        self.labels = LabelRegistry(self.root / "config" / "annotation_labels.json")
         self._rollouts: list[dict[str, Any]] | None = None
         self._rollout_map: dict[str, dict[str, Any]] | None = None
         self._annotation_lock = threading.RLock()
@@ -381,7 +384,7 @@ class TactileApplication:
             except (TypeError, ValueError):
                 continue
             rollout_id = str(row.get("rollout_id") or "")
-            if rollout_id and key in LABEL_KEYS:
+            if rollout_id:
                 item = dict(row)
                 item["event_key"] = key
                 item.pop("event_name", None)
@@ -404,6 +407,8 @@ class TactileApplication:
             raise KeyError("Unknown rollout")
         total_frames = int(record.get("total_frames") or 0)
         normalized: list[dict[str, Any]] = []
+        inactive_seen: Counter[int] = Counter()
+        existing_label_counts: Counter[int] | None = None
         for index, raw in enumerate(events):
             if not isinstance(raw, dict):
                 raise ValueError(f"event {index + 1} must be an object")
@@ -413,10 +418,20 @@ class TactileApplication:
                 end = int(raw.get("end_frame"))
             except (TypeError, ValueError) as exc:
                 raise ValueError(f"event {index + 1} has invalid key/start/end") from exc
-            if key not in LABEL_KEYS:
-                raise ValueError(f"event {index + 1} has unsupported event_key {key}")
-            if key in (3, 4) and record.get("ground_truth_outcome") != "failure":
-                raise ValueError("labels 3/4 require authoritative failure outcome")
+            label = self.labels.get(key)
+            if label is None:
+                raise ValueError(f"event {index + 1} has unregistered event_key {key}; register it before saving")
+            if label["scope"] == "failure" and record.get("ground_truth_outcome") != "failure":
+                raise ValueError(f"label {key} requires authoritative failure outcome")
+            if not label["active"]:
+                if existing_label_counts is None:
+                    existing_label_counts = Counter(
+                        int(item["event_key"])
+                        for item in self.annotations_by_rollout().get(rollout_id, [])
+                    )
+                inactive_seen[key] += 1
+                if inactive_seen[key] > existing_label_counts[key]:
+                    raise ValueError(f"label {key} is inactive and cannot be used for new intervals")
             if start < 0 or end < start:
                 raise ValueError(f"event {index + 1} requires 0 <= start <= end")
             if total_frames and end >= total_frames:
@@ -487,7 +502,8 @@ class TactileApplication:
             ],
             "annotation_source": self._display_path(source, self.source_root) if source else None,
             "annotation_target": str(self.annotation_target_path().relative_to(self.root)),
-            "event_types": list(LABEL_KEYS),
+            "event_types": [row["id"] for row in self.labels.snapshot()["labels"]],
+            "labels": self.labels.snapshot()["labels"],
         }
 
     # ---------- analysis / run browser ----------
@@ -512,11 +528,14 @@ class TactileApplication:
                 counter[key] += 1
                 duration_by_key[key].append(int(event["end_frame"]) - int(event["start_frame"]) + 1)
         type_rows = []
-        for key in LABEL_KEYS:
+        label_map = {row["id"]: row for row in self.labels.snapshot()["labels"]}
+        for key in sorted(set(label_map) | set(counter)):
             durations = duration_by_key[key]
             type_rows.append(
                 {
                     "event_key": key,
+                    "name": label_map[key]["name"] if key in label_map else f"Unknown {key}",
+                    "description": label_map[key]["description"] if key in label_map else "Unregistered historical label",
                     "count": counter[key],
                     "mean_duration_frames": (sum(durations) / len(durations)) if durations else None,
                 }
@@ -808,7 +827,10 @@ class TactileHandler(BaseHTTPRequestHandler):
                 self.json_response(HTTPStatus.OK, self.app.rollout_payload())
                 return
             if path == "/api/event-types":
-                self.json_response(HTTPStatus.OK, {"event_types": list(LABEL_KEYS)})
+                self.json_response(HTTPStatus.OK, {"event_types": [row["id"] for row in self.app.labels.snapshot()["labels"]]})
+                return
+            if path == "/api/labels":
+                self.json_response(HTTPStatus.OK, self.app.labels.snapshot())
                 return
             if path == "/api/analysis":
                 self.json_response(HTTPStatus.OK, self.app.analysis_summary())
@@ -926,6 +948,9 @@ class TactileHandler(BaseHTTPRequestHandler):
                 return
             if path == "/api/settings":
                 self.json_response(HTTPStatus.OK, {"settings": self.app.save_settings(payload)})
+                return
+            if path == "/api/labels":
+                self.json_response(HTTPStatus.OK, self.app.labels.update(payload))
                 return
             if path.startswith("/api/annotations/"):
                 rollout_id = path[len("/api/annotations/"):].strip("/")

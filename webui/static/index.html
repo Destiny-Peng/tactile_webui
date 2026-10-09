@@ -103,14 +103,16 @@
             <aside class="annotation-panel">
               <div class="annotation-panel-header">
                 <div><p class="eyebrow">INTERVAL ANNOTATION</p><h2>Labels</h2></div>
-                <span class="count-chip">1–4</span>
+                <span class="count-chip">Annotation IDs</span>
               </div>
               <div class="shortcut-grid">
                 <span><kbd>1–4</kbd> label</span><span><kbd>Q</kbd> start</span><span><kbd>W</kbd> end</span>
                 <span><kbd>↑/↓</kbd> interval</span><span><kbd>, / .</kbd> rollout</span><span><kbd>Space</kbd> play</span>
               </div>
+              <div id="annotationLabelGuide" class="annotation-label-guide" aria-label="Annotation label definitions"></div>
               <div class="annotation-actions"><button id="addInterval" class="ghost-button" type="button">+ Add interval</button><button id="saveIntervals" class="save-button" type="button">Save</button></div>
               <div id="intervalList" class="interval-list"></div>
+              <div id="activeLabelHelp" class="active-label-help"></div>
               <div id="annotationMessage" class="message"></div>
             </aside>
           </div>
@@ -186,6 +188,12 @@
           <div class="diagnostic-section"><strong>Log directories</strong><div id="diagnosticPaths" class="diagnostic-log mono">Loading…</div></div>
         </section>
       </div>
+      <section class="surface-card page-card label-registry-panel">
+        <div class="panel-heading"><div><p class="eyebrow">ANNOTATION SCHEMA</p><h2>Annotation labels</h2><p class="muted label-registry-intro">Edit display names, descriptions and colors here. IDs and saved events stay unchanged. To replace a meaning, add a new ID rather than repurposing an old one.</p></div></div>
+        <div id="labelRegistryRows" class="label-registry-rows"></div>
+        <div class="annotation-actions"><button id="addLabelDefinition" class="ghost-button" type="button">+ Add label</button><button id="saveLabelDefinitions" class="save-button" type="button">Save labels</button></div>
+        <div id="labelRegistryMessage" class="message"></div>
+      </section>
     </section>
   </main>
 </body>

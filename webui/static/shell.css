@@ -18,11 +18,7 @@
   --radius-xl: 18px;
   --radius-lg: 14px;
   --radius-md: 10px;
-  <<<<<<< HEAD --label-2: #dc6e6e;
-  --label-3: #d99032;
-  --label-4: #4f7df3;
-  --label-1: #2f9e6f;
-  =======--label-1: #4f7df3;
+  --label-1: #4f7df3;
   --label-2: #d96c6c;
   --label-3: #8a6fd1;
   --label-4: #2f9e8b;
@@ -30,7 +26,7 @@
   --label-7: #d99032;
   --label-8: #4f7df3;
   --label-9: #2f9e6f;
-  >>>>>>>ce61d392cded9bb3ebcc090a61aeb3b0f944dabc --curve-0: #7d8ba0;
+  --curve-0: #7d8ba0;
   --curve-1: #4f7df3;
   --curve-2: #d96c6c;
 }
@@ -1699,4 +1695,75 @@ body.theme-dark .label-registry-row { border-color: var(--line); background: var
 @media (max-width: 600px) {
   .label-registry-row { grid-template-columns: 38px 1fr; }
   .label-registry-row > label:nth-child(3) { grid-column: 2; }
+}
+
+
+/* Annotate workspace — narrow labels panel and a collapsible rollout queue. */
+.review-workspace { transition: grid-template-columns .16s ease; }
+.review-workspace.sidebar-collapsed { grid-template-columns: 0 minmax(0,1fr); }
+.review-workspace.sidebar-collapsed .queue-panel { display: none; }
+.review-workspace.sidebar-collapsed .review-stage { min-width: 0; }
+.review-content { grid-template-columns: minmax(0,1.7fr) minmax(18rem,.72fr); }
+.media-column { padding: 20px 20px 26px; }
+.annotation-panel { padding: 17px 16px; }
+.task-title-row { display: flex; align-items: center; gap: 9px; }
+.task-title-row h2 { margin-top: 0; }
+.sidebar-toggle { width: 32px; height: 32px; min-height: 32px; padding: 0; flex: 0 0 auto; font-size: 1.25rem; line-height: 1; }
+.annotation-label-guide { gap: 3px; margin: 9px 0 5px; }
+.annotation-label-definition { font-size: .59rem; }
+.annotation-label-definition .label-explanation { display: none; }
+.annotation-label-definition:hover .label-explanation, .annotation-label-definition:focus-within .label-explanation { display: inline; }
+.annotation-panel-header { padding-bottom: 9px; }
+.annotation-panel-header h2 { font-size: 1.02rem; }
+.shortcut-grid { margin: 9px 0; padding: 8px; }
+.interval-row { padding: 8px; gap: 5px; grid-template-columns: 25px 65px minmax(64px,1fr) minmax(64px,1fr); }
+.interval-list { gap: 6px; }
+/* LF3R review-style camera view pills. */
+.camera-view-controls { display: flex; align-items: center; gap: 9px; min-height: 31px; flex-wrap: wrap; }
+.camera-view-label { color: var(--muted); font-size: .63rem; font-weight: 650; }
+.camera-view-buttons { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+.camera-view-button { min-height: 30px; padding: 5px 10px; border: 1px solid var(--line); background: var(--surface); border-radius: 7px; font-size: .65rem; font-weight: 650; color: var(--muted); }
+.camera-view-button.is-active { color: #335fd1; background: var(--accent-soft); border-color: #b8ccef; }
+.camera-view-button:hover:not(.is-active) { background: var(--surface-raised); }
+.tactile-preview-card { padding: 11px 12px; }
+.tactile-f6-values { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 4px; margin-top: 7px; }
+.tactile-f6-values span { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 3px; color: var(--text); font: .57rem/1.3 ui-monospace,monospace; }
+.tactile-f6-values b { color: var(--muted); font-weight: 650; }
+.tactile-f6-empty { padding: 5px 0; color: var(--muted); font-size: .6rem; }
+.tactile-f6-history { border-top: 1px solid var(--line-soft); padding-top: 12px; margin-top: 12px; }
+.tactile-f6-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 7px; gap: 10px; font-size: .7rem; }
+.tactile-f6-heading label { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: .63rem; }
+.tactile-f6-heading select { padding: 5px 8px; min-height: 29px; font-size: .63rem; }
+.tactile-f6-curve { position: relative; height: 168px; display: flex; align-items: center; justify-content: center; overflow: hidden; border: 1px solid var(--line-soft); border-radius: 8px; background: var(--surface-raised); color: var(--muted); font-size: .65rem; }
+.tactile-f6-curve svg { display: block; width: 100%; height: 100%; }
+.annotate-f6-axis { position: absolute; left: 4px; top: 4px; bottom: 4px; display: flex; flex-direction: column; justify-content: space-between; font: .54rem ui-monospace,monospace; pointer-events: none; color: var(--muted); }
+.annotate-f6-trace { fill: none; stroke-width: 1.6; vector-effect: non-scaling-stroke; opacity: .9; }
+.annotate-f6-trace.f6-0 { stroke: #4787de; }
+.annotate-f6-trace.f6-1 { stroke: #e09a46; }
+.annotate-f6-trace.f6-2 { stroke: #2fa987; }
+.annotate-f6-trace.f6-3 { stroke: #9c6ccc; }
+.annotate-f6-trace.f6-4 { stroke: #d66783; }
+.annotate-f6-trace.f6-5 { stroke: #76919f; }
+.annotate-f6-grid { stroke: var(--line); vector-effect: non-scaling-stroke; }
+.annotate-f6-playhead { stroke: #245ddc; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.tactile-f6-legend { display: flex; gap: 12px; padding-top: 6px; color: var(--muted); font: .6rem ui-monospace,monospace; }
+.tactile-f6-legend span::before { content: ""; display: inline-block; width: 12px; height: 3px; vertical-align: middle; margin-right: 4px; border-radius: 2px; background: #4787de; }
+.tactile-f6-legend span:nth-child(2)::before { background: #e09a46; }
+.tactile-f6-legend span:nth-child(3)::before { background: #2fa987; }
+.tactile-f6-legend span:nth-child(4)::before { background: #9c6ccc; }
+.tactile-f6-legend span:nth-child(5)::before { background: #d66783; }
+.tactile-f6-legend span:nth-child(6)::before { background: #76919f; }
+body.theme-dark .camera-view-button.is-active { background: #1b3156; color: #b7ceff; border-color: #456ca8; }
+body.theme-dark .annotate-tactile-finger { background: var(--surface-raised); }
+@media (max-width: 1180px) {
+  .review-content { grid-template-columns: 1fr; }
+  .review-workspace.sidebar-collapsed { grid-template-columns: 0 minmax(0,1fr); }
+}
+@media (max-width: 850px) {
+  .review-workspace.sidebar-collapsed { grid-template-columns: 1fr; }
+  .review-workspace.sidebar-collapsed .queue-panel { display: none; }
+}
+@media (max-width: 600px) {
+  .annotate-tactile-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .tactile-f6-values { grid-template-columns: repeat(3,minmax(0,1fr)); }
 }

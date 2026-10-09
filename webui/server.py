@@ -30,11 +30,13 @@ try:  # package import for tests
     from .results_service import OnlineResultsService
     from .label_registry import LabelRegistry
     from .tactile_service import FailRecoveryTactileService, MultiTactileService
+    from .video_cache import VideoTranscodeManager, compatible_video
 except ImportError:  # direct ``python webui/server.py`` execution
     from monitoring import WebUIMonitor
     from results_service import OnlineResultsService
     from label_registry import LabelRegistry
     from tactile_service import FailRecoveryTactileService, MultiTactileService
+    from video_cache import VideoTranscodeManager, compatible_video
 
 
 LABEL_KEYS = (1, 2, 3, 4)
@@ -63,6 +65,7 @@ class TactileApplication:
         self.monitor = WebUIMonitor(self.root / "logs" / "webui")
         self.results = OnlineResultsService(self.root)
         self._configure_data_source()
+        self.video_transcode = VideoTranscodeManager(self.root)
 
     # ---------- generic filesystem helpers ----------
 
@@ -916,6 +919,13 @@ class TactileHandler(BaseHTTPRequestHandler):
             if path == "/api/analysis":
                 self.json_response(HTTPStatus.OK, self.app.analysis_summary())
                 return
+            if path == "/api/video-transcode":
+                self.app.load_rollouts()
+                snapshot = self.app.video_transcode.snapshot()
+                snapshot["manifests"] = [dict(info) for info in self.app._manifest_info]
+                snapshot["cache_dir"] = str(self.app.video_transcode.cache_dir)
+                self.json_response(HTTPStatus.OK, snapshot)
+                return
             if path == "/api/runs":
                 self.json_response(HTTPStatus.OK, {"runs": self.app.list_runs(), "runs_root": self.app.settings["runs_root"]})
                 return
@@ -979,7 +989,8 @@ class TactileHandler(BaseHTTPRequestHandler):
                     return
                 camera = self._camera_for_rollout(rollout, query, self.app.settings["default_camera"])
                 camera_paths = rollout.get("camera_video_paths") or {}
-                self.serve_video(self.app.source_file(camera_paths.get(camera), ".mp4", rollout_id))
+                original = self.app.source_file(camera_paths.get(camera), ".mp4", rollout_id)
+                self.serve_video(compatible_video(original, self.app.video_transcode.cache_dir))
                 return
             if path.startswith("/api/tactile/"):
                 parts = path.strip("/").split("/")
@@ -1026,6 +1037,10 @@ class TactileHandler(BaseHTTPRequestHandler):
                     raise ValueError("events must be a list")
                 accepted = self.app.monitor.record_client_events(events)
                 self.json_response(HTTPStatus.OK, {"accepted": accepted})
+                return
+            if path == "/api/video-transcode":
+                started = self.app.video_transcode.submit(self.app, payload.get("manifest_paths"))
+                self.json_response(HTTPStatus.ACCEPTED, started)
                 return
             if path == "/api/settings":
                 self.json_response(HTTPStatus.OK, {"settings": self.app.save_settings(payload)})

@@ -196,7 +196,7 @@ class WorkspaceAnnotationTest(unittest.TestCase):
         self.assertIn("resultAnnotationLabels", javascript)
         self.assertIn("visibleAnnotationLabels", javascript)
         self.assertIn("renderResultsAnnotationTimeline", javascript)
-        self.assertIn("Array.isArray(labelKeys) ? labelKeys : LABEL_KEYS", javascript)
+        self.assertIn("Array.isArray(labelKeys) ? labelKeys : Array.from(new Set", javascript)
 
     def test_rejects_invalid_interval(self):
         temporary, app = self.make_app()

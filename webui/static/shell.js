@@ -782,6 +782,78 @@ async function loadRuns() {
     container.innerHTML = runs.map(function (run) { return '<div class="run-row"><div><div class="run-path">' + escapeHtml(run.path) + '</div><div class="muted" style="font-size:.57rem;margin-top:3px">' + escapeHtml(formatDate(run.modified_at)) + '</div></div><div class="run-markers">' + (run.markers || []).map(function (marker) { return badge(marker, ""); }).join("") + '</div><span class="badge">tactile</span></div>'; }).join("");
   } catch (error) { container.innerHTML = '<div class="message error">' + escapeHtml(error.message) + '</div>'; }
 }
+function renderLabelSettings() {
+  var container = byId("labelRegistryRows");
+  if (!container) return;
+  var rows = state.labelDraft || [];
+  var existing = state.labels.map(function (label) { return label.id; });
+  container.innerHTML = rows.map(function (label) {
+    var isNew = existing.indexOf(label.id) < 0;
+    return '<div class="label-registry-row" data-label-id="' + label.id + '">'
+      + '<div><span class="label-field-title">ID</span><strong class="label-id">' + label.id + '</strong></div>'
+      + '<label><span>Name</span><input type="text" maxlength="64" data-field="name" value="' + escapeHtml(label.name) + '"></label>'
+      + '<label><span>Description</span><textarea rows="2" maxlength="500" data-field="description">' + escapeHtml(label.description) + '</textarea></label>'
+      + '<label><span>Color</span><input type="color" data-field="color" value="' + escapeHtml(label.color) + '"></label>'
+      + '<label><span>Eligibility</span>' + (isNew
+        ? '<select data-field="scope"><option value="all"' + (label.scope === 'all' ? ' selected' : '') + '>All</option><option value="failure"' + (label.scope === 'failure' ? ' selected' : '') + '>Failure only</option></select>'
+        : '<span class="label-scope-static">' + (label.scope === 'failure' ? 'Failure only' : 'All rollouts') + '</span>') + '</label>'
+      + '<label><span>Active</span><input type="checkbox" data-field="active"' + (label.active ? ' checked' : '') + '></label>'
+      + '</div>';
+  }).join('');
+}
+function updateLabelDraft(event) {
+  var target = event.target;
+  var field = target && target.dataset && target.dataset.field;
+  var row = target && target.closest && target.closest('[data-label-id]');
+  if (!field || !row || !state.labelDraft) return;
+  var label = state.labelDraft.find(function (item) { return item.id === Number(row.dataset.labelId); });
+  if (!label) return;
+  if (field === 'active') label[field] = Boolean(target.checked);
+  else if (['name', 'description', 'color', 'scope'].indexOf(field) >= 0) label[field] = target.value;
+}
+function addLabelDefinition() {
+  if (!state.labelDraft) return;
+  var next = Math.max(0, ...state.labelDraft.map(function (label) { return label.id; })) + 1;
+  state.labelDraft.push({ id: next, name: 'New label', description: '', color: '#64748b', scope: 'all', active: true });
+  renderLabelSettings();
+  var node = byId("labelRegistryMessage"); node.textContent = 'Configure the new ID and save. IDs are never reused.'; node.className = 'message';
+}
+async function loadLabelSettings() {
+  try {
+    var data = await jsonRequest('/api/labels');
+    state.labels = data.labels || [];
+    LABEL_KEYS = state.labels.map(function (label) { return label.id; });
+    state.labelDraft = state.labels.map(function (label) { return Object.assign({}, label); });
+    renderLabelSettings();
+  } catch (error) {
+    byId('labelRegistryRows').innerHTML = '<div class="message error">' + escapeHtml(error.message) + '</div>';
+  }
+}
+async function saveLabelDefinitions() {
+  if (!state.labelDraft) return;
+  var button = byId('saveLabelDefinitions'), message = byId('labelRegistryMessage');
+  button.disabled = true;
+  try {
+    var data = await jsonRequest('/api/labels', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ schema_version: 1, dataset: 'failrecovery', labels: state.labelDraft })
+    });
+    state.labels = data.labels || [];
+    LABEL_KEYS = state.labels.map(function (label) { return label.id; });
+    state.labelDraft = state.labels.map(function (label) { return Object.assign({}, label); });
+    renderLabelSettings();
+    if (selectedRollout()) { renderIntervals(); renderAnnotateTimeline(); }
+    if (resultRollout()) { renderResultsLabelFilters(); renderResultsAnnotationTimeline(); }
+    message.textContent = 'Label definitions saved. Event IDs and saved intervals are unchanged.';
+    message.className = 'message success';
+  } catch (error) {
+    message.textContent = error.message;
+    message.className = 'message error';
+  } finally {
+    button.disabled = false;
+  }
+}
+
 async function loadSettings() {
   try {
     var payload = await jsonRequest("/api/settings"); var settings = payload.settings || {}; state.settings = settings; applyTheme(settings.theme);

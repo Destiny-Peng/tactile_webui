@@ -133,6 +133,25 @@ logs/webui/client/
 
 The Settings → Diagnostics panel reports server/video latency, HTTP errors, browser video stalls/errors and the active log paths. Successful high-frequency tactile requests are sampled so monitoring does not add material I/O load.
 
+## One-episode Deform compression benchmark
+
+To compare lossy WebP with the existing PNG approach using an **original** recorder episode (no export/copy of the dataset):
+
+```bash
+python -m pip install Pillow
+python tools/benchmark_deform_webp.py /path/to/episode.sqlite3
+```
+
+A path to the episode directory also works. The script reads `events` and `tactile_frames.deform_blob` directly from SQLite in read-only mode; by default it tests every right-hand Deform frame at the original resolution. It measures PNG level 3, WebP Q60/Q70/Q80/Q90, sampled PSNR/decode latency, and a real indexed Q80 cache SQLite file. Raw and compressed random lookup times are also compared.
+
+Results are saved automatically under `outputs/tactile_webp_benchmark/<episode>_<timestamp>/`:
+
+- `report.md`: brief Markdown report you can paste into ChatGPT;
+- `results.json`: full machine-readable metrics;
+- `comparison.png`: raw versus all WebP qualities, on three sampled frames.
+
+The temporary Q80 cache is removed after timing. Pass `--keep-cache` to retain it, or `--max-images 300` for a quick non-representative subset. The original SQLite, video, annotations and manifest are never rewritten. Benchmarking requires Pillow, but running the WebUI itself does not.
+
 ## Tests
 
 ```bash

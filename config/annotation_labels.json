@@ -23,7 +23,7 @@
       "name": "Dropped object",
       "description": "The object is dropped during manipulation.",
       "color": "#8a6fd1",
-      "scope": "failure",
+      "scope": "all",
       "active": true
     },
     {
@@ -31,7 +31,7 @@
       "name": "Wrong object",
       "description": "The robot interacts with the wrong object.",
       "color": "#2f9e8b",
-      "scope": "failure",
+      "scope": "all",
       "active": true
     }
   ]

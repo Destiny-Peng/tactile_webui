@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import bisect
 import json
+import sqlite3
 import struct
 import threading
 import zlib
 from collections import OrderedDict
+from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -26,6 +28,7 @@ class EpisodeTactile:
     events: dict[str, dict[str, Any]]
     finger_events: dict[tuple[str, str], dict[str, Any]]
     streams: dict[str, dict[str, Path]]
+    sqlite_path: Path | None = None
 
 
 class FailRecoveryTactileService:
@@ -38,6 +41,7 @@ class FailRecoveryTactileService:
         *,
         episode_cache_limit: int = 2,
         series_cache_limit: int = 2,
+        manifest_rows: list[dict[str, Any]] | None = None,
     ) -> None:
         self.project_root = project_root.expanduser().resolve()
         self.manifest_path = (manifest_path or (
@@ -70,7 +74,13 @@ class FailRecoveryTactileService:
         self._sprite_cache_limit = 96
         self._manifest_rows: dict[str, dict[str, Any]] = {}
         self._episode_locks: dict[str, threading.Lock] = {}
-        self._load_manifest()
+        self._image_cache: OrderedDict[tuple[str, str, str, str], bytes] = OrderedDict()
+        self._image_cache_limit = 128
+        self._image_cache_lock = threading.Lock()
+        if manifest_rows is None:
+            self._load_manifest()
+        else:
+            self._register_manifest_rows(manifest_rows)
 
     def _project_file(self, value: Any) -> Path:
         if not isinstance(value, str) or not value.strip():
@@ -133,13 +143,128 @@ class FailRecoveryTactileService:
             manifest_rows = self._jsonl(self.manifest_path)
         except (OSError, json.JSONDecodeError):
             return
-        for row in manifest_rows:
+        self._register_manifest_rows(manifest_rows)
+
+    def _register_manifest_rows(self, rows: list[dict[str, Any]]) -> None:
+        for row in rows:
             rollout_id = str(row.get("id") or "").strip()
             if rollout_id:
                 self._manifest_rows[rollout_id] = row
                 self._episode_locks[rollout_id] = threading.Lock()
 
+    def _sqlite_database(self, row: dict[str, Any]) -> Path | None:
+        value = row.get("sqlite_path") or row.get("source_database_path")
+        if not isinstance(value, str) or not value.strip():
+            return None
+        raw = Path(value).expanduser()
+        path = raw.resolve() if raw.is_absolute() else self._project_file(value)
+        # The source manifest is a trusted local file, not a URL parameter.
+        # Historical LF3R manifests may point to the recorder DB outside the
+        # exported LF3R repository; keep that original location read-only.
+        return path if path.is_file() else None
+
+    @staticmethod
+    def _sqlite_connect(path: Path) -> sqlite3.Connection:
+        # mode=ro does not create the database or make modifications. Unlike
+        # immutable=1, it is safe when the recorder has not checkpointed WAL.
+        connection = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA query_only=ON")
+        return connection
+
+    def _load_sqlite_episode(self, rollout_id: str, database: Path) -> EpisodeTactile:
+        # Avoid SELECT *: never load large raw/deform BLOBs while building
+        # episode synchronization and F6 history.
+        with closing(self._sqlite_connect(database)) as connection:
+            frames: list[dict[str, Any]] = []
+            for frame in connection.execute(
+                "SELECT frame_index, elapsed_s, tick_wall_ns, tick_mono_ns, "
+                "complete, snapshot_json FROM synchronized_frames ORDER BY frame_index"
+            ):
+                snapshot = json.loads(frame["snapshot_json"])
+                cameras = {}
+                for camera, source in (
+                    ("cam_high", "realsense_color"), ("cam_wrist", "wrist_right")
+                ):
+                    item = snapshot.get("camera:" + source)
+                    cameras[camera] = item.get("frame_index") if isinstance(item, dict) else None
+                tactile = {}
+                for finger in FINGERS:
+                    item = snapshot.get("tactile:right:" + finger)
+                    item = item if isinstance(item, dict) else {}
+                    tactile[finger] = {
+                        "event_id": item.get("event_id"),
+                        "age_ms": item.get("age_ms"),
+                        "stale": item.get("stale"),
+                        "valid": item.get("valid"),
+                    }
+                frames.append({
+                    "frame_index": frame["frame_index"],
+                    "elapsed_s": frame["elapsed_s"],
+                    "tick_wall_ns": frame["tick_wall_ns"],
+                    "tick_mono_ns": frame["tick_mono_ns"],
+                    "complete": bool(frame["complete"]),
+                    "camera_frame_indices": cameras,
+                    "tactile": tactile,
+                })
+
+            events: dict[str, dict[str, Any]] = {}
+            finger_events: dict[tuple[str, str], dict[str, Any]] = {}
+            query = (
+                "SELECT e.id, e.sensor_ts_ns, e.receive_wall_ns, e.receive_mono_ns, "
+                "e.valid, t.rowid AS tactile_rowid, t.finger, t.f6_json, "
+                "t.raw_shape_json, t.deform_shape_json, "
+                "length(t.raw_blob) AS raw_bytes, length(t.deform_blob) AS deform_bytes "
+                "FROM tactile_frames t JOIN events e ON e.id=t.event_id "
+                "WHERE e.source LIKE 'tactile:right:%' AND t.side='right' ORDER BY e.id"
+            )
+            for item in connection.execute(query):
+                finger = str(item["finger"]).lower()
+                if finger not in FINGERS:
+                    continue
+                event_id = str(item["id"])
+                value: dict[str, Any] = {
+                    "event_id": item["id"], "finger": finger,
+                    "sensor_ts_ns": item["sensor_ts_ns"],
+                    "receive_wall_ns": item["receive_wall_ns"],
+                    "receive_mono_ns": item["receive_mono_ns"],
+                    "valid": bool(item["valid"]),
+                    "f6": json.loads(item["f6_json"]) if item["f6_json"] else None,
+                    "_sqlite_rowid": item["tactile_rowid"],
+                }
+                for kind in KINDS:
+                    raw_shape = item[kind + "_shape_json"]
+                    length = item[kind + "_bytes"]
+                    if raw_shape and length is not None:
+                        value[kind + "_shape"] = json.loads(raw_shape)
+                        value[kind + "_length_bytes"] = length
+                        value[kind + "_offset_bytes"] = 0
+                events[event_id] = value
+                finger_events[(finger, event_id)] = value
+
+        camera_pairs: dict[str, list[tuple[int, int]]] = {}
+        for index, frame in enumerate(frames):
+            for camera, value in frame["camera_frame_indices"].items():
+                if value is not None:
+                    camera_pairs.setdefault(camera, []).append((int(value), index))
+        camera_frames: dict[str, list[int]] = {}
+        camera_rows: dict[str, list[int]] = {}
+        for camera, pairs in camera_pairs.items():
+            pairs.sort()
+            camera_frames[camera] = [x for x, _ in pairs]
+            camera_rows[camera] = [index for _, index in pairs]
+        # A stand-in for existing image_kinds checking in frame() and series().
+        streams = {finger: {kind: database for kind in KINDS} for finger in FINGERS}
+        return EpisodeTactile(
+            rollout_id=rollout_id, frames=frames, camera_frames=camera_frames,
+            camera_rows=camera_rows, events=events, finger_events=finger_events,
+            streams=streams, sqlite_path=database,
+        )
+
     def _load_episode(self, rollout_id: str, row: dict[str, Any]) -> EpisodeTactile:
+        database = self._sqlite_database(row)
+        if database is not None:
+            return self._load_sqlite_episode(rollout_id, database)
         frames_path = self._project_file(row.get("synchronized_frames_path"))
         events_path = self._project_file(row.get("tactile_events_path"))
         streams = self._stream_paths(row)
@@ -211,7 +336,7 @@ class FailRecoveryTactileService:
                     return episode
             try:
                 episode = self._load_episode(rollout_id, row)
-            except (OSError, ValueError) as exc:
+            except (OSError, ValueError, sqlite3.Error, json.JSONDecodeError) as exc:
                 raise KeyError("tactile rollout not found") from exc
             with self._cache_lock:
                 self._episode_cache_misses += 1
@@ -468,9 +593,19 @@ class FailRecoveryTactileService:
         height, width = shape
         if height <= 0 or width <= 0 or length != height * width:
             return None
-        with stream.open("rb") as handle:
-            handle.seek(offset)
-            data = handle.read(length)
+        if episode.sqlite_path is not None:
+            rowid = event.get("_sqlite_rowid")
+            if rowid is None:
+                return None
+            with closing(self._sqlite_connect(episode.sqlite_path)) as connection:
+                result = connection.execute(
+                    f"SELECT {kind}_blob FROM tactile_frames WHERE rowid=?", (rowid,)
+                ).fetchone()
+            data = result[0] if result else b""
+        else:
+            with stream.open("rb") as handle:
+                handle.seek(offset)
+                data = handle.read(length)
         if len(data) != length:
             raise ValueError("short tactile image read")
         return data, shape
@@ -597,6 +732,8 @@ class FailRecoveryTactileService:
         if finger not in FINGERS or kind not in KINDS:
             raise KeyError("unknown tactile image")
         episode = self._episode(rollout_id)
+        if episode.sqlite_path is not None:
+            return None
         event = self._event(episode, finger, event_id)
         stream = episode.streams.get(finger, {}).get(kind)
         if event is None or stream is None:
@@ -610,7 +747,25 @@ class FailRecoveryTactileService:
     def image(self, rollout_id: str, finger: str, event_id: str, kind: str) -> bytes:
         if finger not in FINGERS or kind not in KINDS:
             raise KeyError("unknown tactile image")
+        cache_key = (rollout_id, finger, str(event_id), kind)
+        with self._image_cache_lock:
+            cached = self._image_cache.get(cache_key)
+            if cached is not None:
+                self._image_cache.move_to_end(cache_key)
+                return cached
         episode = self._episode(rollout_id)
+        if episode.sqlite_path is not None:
+            result = self._read_image(episode, finger, event_id, kind)
+            if result is None:
+                raise KeyError("tactile image not found")
+            pixels, shape = result
+            body = self._png(pixels, shape, compression_level=3)
+            with self._image_cache_lock:
+                self._image_cache[cache_key] = body
+                self._image_cache.move_to_end(cache_key)
+                while len(self._image_cache) > self._image_cache_limit:
+                    self._image_cache.popitem(last=False)
+            return body
         event = self._event(episode, finger, event_id)
         stream = episode.streams.get(finger, {}).get(kind)
         if event is None or stream is None:
@@ -633,3 +788,55 @@ class FailRecoveryTactileService:
         if len(data) != length:
             raise ValueError("short tactile image read")
         return self._png(data, shape)
+
+
+class MultiTactileService:
+    """Route existing tactile endpoints to the correct source-manifest reader.
+
+    Each reader has its own original data root. All source files stay in place.
+    """
+
+    def __init__(self, sources: list[tuple[Path, Path, list[dict[str, Any]]]]) -> None:
+        self._by_rollout: dict[str, FailRecoveryTactileService] = {}
+        self._readers: list[FailRecoveryTactileService] = []
+        for manifest, root, rows in sources:
+            if not rows:
+                continue
+            reader = FailRecoveryTactileService(root, manifest, manifest_rows=rows)
+            for row in rows:
+                rollout_id = str(row["id"])
+                if rollout_id in self._by_rollout:
+                    raise ValueError(f"Duplicate rollout id across tactile readers: {rollout_id}")
+                self._by_rollout[rollout_id] = reader
+            self._readers.append(reader)
+
+    def has_rollout(self, rollout_id: str) -> bool:
+        return rollout_id in self._by_rollout
+
+    def _reader(self, rollout_id: str) -> FailRecoveryTactileService:
+        try:
+            return self._by_rollout[rollout_id]
+        except KeyError as exc:
+            raise KeyError("tactile rollout not found") from exc
+
+    def frame(self, rollout_id: str, camera: str, video_frame: int) -> dict[str, Any]:
+        return self._reader(rollout_id).frame(rollout_id, camera, video_frame)
+
+    def series(self, rollout_id: str, camera: str) -> dict[str, Any]:
+        return self._reader(rollout_id).series(rollout_id, camera)
+
+    def sprite(self, rollout_id: str, camera: str, video_frame: int, kind: str) -> bytes:
+        return self._reader(rollout_id).sprite(rollout_id, camera, video_frame, kind)
+
+    def image(self, rollout_id: str, finger: str, event_id: str, kind: str) -> bytes:
+        return self._reader(rollout_id).image(rollout_id, finger, event_id, kind)
+
+    def cache_stats(self) -> dict[str, Any]:
+        sources = [reader.cache_stats() for reader in self._readers]
+        aggregate: dict[str, Any] = {"readers": len(sources), "sources": sources}
+        for cache in ("episodes", "series", "sprites"):
+            aggregate[cache] = {
+                field: sum(int(source.get(cache, {}).get(field, 0)) for source in sources)
+                for field in ("size", "limit", "hits", "misses", "evictions")
+            }
+        return aggregate

@@ -49,9 +49,10 @@
   function supportsTactile(record) {
     return Boolean(
       record
-      && record.synchronized_frames_path
-      && record.tactile_events_path
-      && record.tactile_stream_paths
+      && ((record.sqlite_path || record.source_database_path)
+        || (record.synchronized_frames_path
+          && record.tactile_events_path
+          && record.tactile_stream_paths))
     );
   }
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import mimetypes
+import sqlite3
 import os
 import re
 import tempfile
@@ -28,12 +29,12 @@ try:  # package import for tests
     from .monitoring import WebUIMonitor
     from .results_service import OnlineResultsService
     from .label_registry import LabelRegistry
-    from .tactile_service import FailRecoveryTactileService
+    from .tactile_service import FailRecoveryTactileService, MultiTactileService
 except ImportError:  # direct ``python webui/server.py`` execution
     from monitoring import WebUIMonitor
     from results_service import OnlineResultsService
     from label_registry import LabelRegistry
-    from tactile_service import FailRecoveryTactileService
+    from tactile_service import FailRecoveryTactileService, MultiTactileService
 
 
 LABEL_KEYS = (1, 2, 3, 4)
@@ -71,40 +72,138 @@ class TactileApplication:
         if not source.is_absolute():
             source = self.root / source
         self.source_root = source.resolve()
+        self._catalog_signature: tuple[Any, ...] | None = None
+        self._reload_catalog()
 
-        dataset_root = self.source_root / "datasets" / "failrecovery"
-        manifest_entry = dataset_root / "manifest.jsonl"
-        transitional_manifest = (
-            self.source_root
-            / "datasets"
-            / "lf3r_failure_rollouts"
-            / "failrecovery_manifest.jsonl"
-        )
-        legacy_manifest = (
-            self.source_root
-            / "datasets"
-            / "lf3r_failure_rollouts"
-            / "v1"
-            / "failrecovery_manifest.jsonl"
-        )
+    def _discover_manifest_paths(self) -> list[Path]:
+        # Parallel peer manifests, following LF3R's multi-manifest catalog.
+        # Logical entries may point to other disks through symlinks.
+        dataset_dir = self.source_root / "datasets"
+        candidates = list(sorted(dataset_dir.glob("*/manifest.jsonl")))
+        candidates += [dataset_dir / "lf3r_failure_rollouts/v1/failrecovery_manifest.jsonl"]
+        candidates += [dataset_dir / "lf3r_failure_rollouts/failrecovery_manifest.jsonl"]
+        paths: list[Path] = []
+        seen: set[Path] = set()
+        for candidate in candidates:
+            if not candidate.is_file():
+                continue
+            resolved = candidate.resolve()
+            if resolved not in seen:
+                paths.append(resolved)
+                seen.add(resolved)
+        if not paths:
+            paths.append(dataset_dir / "lf3r_failure_rollouts/v1/failrecovery_manifest.jsonl")
+        return paths
 
-        # The canonical standalone layout may keep manifest.jsonl as a symlink
-        # into the original LF3R repository. Resolve that link, then infer the
-        # root that the manifest's historical project-relative paths belong to.
-        if manifest_entry.is_file():
-            self.manifest_path = manifest_entry.resolve()
-        elif transitional_manifest.is_file():
-            self.manifest_path = transitional_manifest.resolve()
-        else:
-            self.manifest_path = legacy_manifest.resolve()
+    def _current_catalog_signature(self) -> tuple[Any, ...]:
+        signature = []
+        for path in self._discover_manifest_paths():
+            try:
+                info = path.stat()
+                signature.append((str(path), info.st_mtime_ns, info.st_size))
+            except OSError:
+                signature.append((str(path), None, None))
+        return tuple(signature)
 
+    def _reload_catalog(self) -> None:
+        self.manifest_paths = self._discover_manifest_paths()
+        self.manifest_path = self.manifest_paths[0]
         self.data_root = self._infer_manifest_data_root(
-            self.manifest_path,
-            fallback=self.source_root,
+            self.manifest_path, fallback=self.source_root
         )
-        self.tactile = FailRecoveryTactileService(self.data_root, self.manifest_path)
-        self._rollouts = None
-        self._rollout_map = None
+        self._manifest_info: list[dict[str, Any]] = []
+        all_rows: list[dict[str, Any]] = []
+        sources: list[tuple[Path, Path, list[dict[str, Any]]]] = []
+        self._root_by_id: dict[str, Path] = {}
+        seen_ids: set[str] = set()
+        for manifest in self.manifest_paths:
+            label = manifest.parent.name if manifest.name == "manifest.jsonl" else manifest.stem
+            default_root = self._infer_manifest_data_root(manifest, fallback=self.source_root)
+            info: dict[str, Any] = {
+                "path": self._display_path(manifest, self.source_root),
+                "label": label, "rollouts": 0, "valid": False, "error": None,
+            }
+            self._manifest_info.append(info)
+            if not manifest.is_file():
+                info["error"] = "manifest does not exist"
+                continue
+            try:
+                parsed = self._read_jsonl(manifest)
+                if not parsed:
+                    raise ValueError("manifest is empty")
+                candidates: list[tuple[dict[str, Any], Path]] = []
+                local_ids: set[str] = set()
+                for value in parsed:
+                    rid = str(value.get("id") or "").strip()
+                    if not re.fullmatch(r"[A-Za-z0-9._-]{1,160}", rid):
+                        raise ValueError(f"invalid rollout id: {rid!r}")
+                    if rid in local_ids or rid in seen_ids:
+                        raise ValueError(f"duplicate rollout id: {rid}")
+                    local_ids.add(rid)
+                    row = dict(value)
+                    root = default_root
+                    declared_root = row.get("data_root")
+                    if declared_root:
+                        root = Path(str(declared_root)).expanduser().resolve()
+                        if not root.is_dir():
+                            raise ValueError(f"missing source data root: {root}")
+
+                    # Historical LF3R manifests contain an absolute pointer to
+                    # the original recorder DB. Prefer it and the original MP4
+                    # over the large exported tactile streams and copied videos.
+                    database_field = row.get("sqlite_path") or row.get("source_database_path")
+                    if isinstance(database_field, str) and database_field.strip():
+                        database_raw = Path(database_field).expanduser()
+                        database = (
+                            database_raw.resolve()
+                            if database_raw.is_absolute()
+                            else (root / database_raw).resolve()
+                        )
+                        if database.is_file():
+                            if database_raw.is_absolute() and not declared_root:
+                                root = database.parent.parent
+                            original_videos = {
+                                "cam_high": database.parent / "videos/realsense_color.mp4",
+                                "cam_wrist": database.parent / "videos/wrist_right.mp4",
+                            }
+                            if all(path.is_file() for path in original_videos.values()):
+                                row["camera_video_paths"] = {
+                                    camera: str(path.resolve())
+                                    for camera, path in original_videos.items()
+                                }
+                            row["sqlite_path"] = str(database)
+                    camera_paths = row.get("camera_video_paths")
+                    if not isinstance(camera_paths, dict) or not camera_paths:
+                        raise ValueError(f"missing video paths: {rid}")
+                    row.setdefault("manifest_source", info["path"])
+                    row.setdefault("manifest_label", label)
+                    row.setdefault("source_kind", "real_robot")
+                    row.setdefault(
+                        "task_description",
+                        row.get("instruction") or row.get("task_key") or "Tactile task",
+                    )
+                    candidates.append((row, root))
+            except (OSError, ValueError, json.JSONDecodeError) as exc:
+                info["error"] = str(exc)
+                continue
+            for row, root in candidates:
+                rid = str(row["id"])
+                seen_ids.add(rid)
+                self._root_by_id[rid] = root
+                all_rows.append(row)
+            # One reader per (manifest, resolved source root), so heterogeneous
+            # sources do not accidentally resolve their paths against peers.
+            by_root: dict[Path, list[dict[str, Any]]] = {}
+            for row, root in candidates:
+                by_root.setdefault(root, []).append(row)
+            sources.extend((manifest, root, rows) for root, rows in by_root.items())
+            info["valid"] = True
+            info["rollouts"] = len(candidates)
+
+        self._rollouts = all_rows
+        self._rollout_map = {str(row["id"]): row for row in all_rows}
+        self.tactile = MultiTactileService(sources)
+        self._catalog_signature = self._current_catalog_signature()
 
     @classmethod
     def _infer_manifest_data_root(cls, manifest_path: Path, fallback: Path) -> Path:
@@ -197,13 +296,16 @@ class TactileApplication:
             raise ValueError(f"expected {suffix} file")
         return path
 
-    def source_file(self, value: Any, suffix: str | None = None) -> Path:
+    def source_file(
+        self, value: Any, suffix: str | None = None, rollout_id: str | None = None
+    ) -> Path:
         if not isinstance(value, str) or not value.strip():
             raise ValueError("missing source-project-relative path")
+        root = self._root_by_id.get(rollout_id, self.data_root)
         raw = Path(value).expanduser()
-        path = raw.resolve() if raw.is_absolute() else (self.data_root / raw).resolve()
+        path = raw.resolve() if raw.is_absolute() else (root / raw).resolve()
         try:
-            path.relative_to(self.data_root)
+            path.relative_to(root)
         except ValueError as exc:
             raise ValueError("source data path escapes resolved data root") from exc
         if suffix and path.suffix.lower() != suffix.lower():
@@ -296,26 +398,12 @@ class TactileApplication:
     # ---------- rollout manifest ----------
 
     def load_rollouts(self, refresh: bool = False) -> list[dict[str, Any]]:
-        if self._rollouts is not None and not refresh:
-            return self._rollouts
-        rows: list[dict[str, Any]] = []
-        if self.manifest_path.is_file():
-            for value in self._read_jsonl(self.manifest_path):
-                row = dict(value)
-                row.setdefault("manifest_source", self._display_path(self.manifest_path, self.data_root))
-                row.setdefault("manifest_label", "failrecovery")
-                row.setdefault("source_kind", "real_robot")
-                row.setdefault("task_description", row.get("instruction") or row.get("task_key") or "Tactile task")
-                rows.append(row)
-        self._rollouts = rows
-        self._rollout_map = {
-            str(row.get("id")): row for row in rows if str(row.get("id") or "").strip()
-        }
-        return rows
+        if refresh or self._catalog_signature != self._current_catalog_signature():
+            self._reload_catalog()
+        return self._rollouts or []
 
     def rollout_map(self) -> dict[str, dict[str, Any]]:
-        if self._rollout_map is None:
-            self.load_rollouts()
+        self.load_rollouts()
         return self._rollout_map or {}
 
     # ---------- tactile interval annotations ----------
@@ -492,14 +580,7 @@ class TactileApplication:
         source = self.annotation_seed_path()
         return {
             "rollouts": rows,
-            "manifests": [
-                {
-                    "path": self._display_path(self.manifest_path, self.source_root),
-                    "label": "failrecovery",
-                    "rollouts": len(rows),
-                    "valid": self.manifest_path.is_file(),
-                }
-            ],
+            "manifests": [dict(info) for info in self._manifest_info],
             "annotation_source": self._display_path(source, self.source_root) if source else None,
             "annotation_target": str(self.annotation_target_path().relative_to(self.root)),
             "event_types": [row["id"] for row in self.labels.snapshot()["labels"]],
@@ -898,7 +979,7 @@ class TactileHandler(BaseHTTPRequestHandler):
                     return
                 camera = self._camera_for_rollout(rollout, query, self.app.settings["default_camera"])
                 camera_paths = rollout.get("camera_video_paths") or {}
-                self.serve_video(self.app.source_file(camera_paths.get(camera), ".mp4"))
+                self.serve_video(self.app.source_file(camera_paths.get(camera), ".mp4", rollout_id))
                 return
             if path.startswith("/api/tactile/"):
                 parts = path.strip("/").split("/")

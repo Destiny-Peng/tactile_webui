@@ -36,7 +36,7 @@
 
   <main class="workspace-shell">
     <section id="view-annotate" class="view active-view">
-      <div class="review-workspace">
+      <div id="annotateWorkspace" class="review-workspace">
         <aside id="annotateSidebar" class="queue-panel">
           <div class="panel-heading">
             <div><p class="eyebrow">DATASET</p><h2>Rollouts</h2></div>
@@ -45,9 +45,11 @@
           <label class="search-box"><span class="sr-only">Search rollouts</span><input id="annotateSearch" type="search" placeholder="Search rollout or task…" autocomplete="off"></label>
           <div class="filter-grid">
             <label><span>Task</span><select id="annotateTaskFilter"><option value="all">All tasks</option></select></label>
-            <label><span>Review</span><select id="annotateReviewFilter"><option value="all">All</option><option value="complete">Complete</option><option value="unreviewed">Unreviewed</option></select></label>
+            <label><span>Outcome</span><select id="annotateOutcomeFilter"><option value="all">All outcomes</option><option value="success">Success</option><option value="failure">Failure</option></select></label>
+            <label><span>Review</span><select id="annotateReviewFilter"><option value="all">All states</option><option value="complete">Complete</option><option value="unreviewed">Unreviewed</option></select></label>
           </div>
           <div id="annotateRolloutList" class="rollout-list"></div>
+          <button id="toggleRolloutSidebar" class="review-queue-toggle" type="button" aria-controls="annotateSidebar" aria-expanded="true" aria-label="Collapse rollout queue" title="Collapse rollout queue">‹</button>
         </aside>
 
         <section class="review-stage">
@@ -61,7 +63,7 @@
             <div class="media-column">
               <section class="task-header">
                 <div>
-                  <div class="task-title-row"><button id="toggleRolloutSidebar" class="sidebar-toggle ghost-button" type="button" aria-controls="annotateSidebar" aria-expanded="true" title="Collapse rollout list">‹</button><h2 id="annotateTaskTitle">Task</h2></div>
+                  <h2 id="annotateTaskTitle">Task</h2>
                   <p id="annotateRecordMeta" class="record-meta"></p>
                 </div>
                 <div class="navigation-actions">
@@ -72,9 +74,11 @@
 
               <section class="video-view-controls">
                 <div id="annotateCamera" class="camera-view-controls" role="group" aria-label="Video camera view"></div>
-                <span id="annotateFrameText" class="mono">Frame 0 / 0</span>
-                <span id="annotateTimeText" class="mono">00:00.000</span>
-                <span id="annotateVideoHealth" class="health-pill idle">Video idle</span>
+                <div class="video-frame-status">
+                  <span id="annotateFrameText" class="mono">Frame 0 / 0</span>
+                  <span id="annotateTimeText" class="mono">00:00.000</span>
+                  <span id="annotateVideoHealth" class="health-pill idle">Video idle</span>
+                </div>
               </section>
 
               <div class="video-shell"><video id="annotateVideo" preload="metadata" playsinline></video></div>

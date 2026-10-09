@@ -787,3 +787,51 @@ class FailRecoveryTactileService:
         if len(data) != length:
             raise ValueError("short tactile image read")
         return self._png(data, shape)
+
+
+class MultiTactileService:
+    """Route existing tactile endpoints to the correct source-manifest reader.
+
+    Each reader has its own original data root. All source files stay in place.
+    """
+
+    def __init__(self, sources: list[tuple[Path, Path, list[dict[str, Any]]]]) -> None:
+        self._by_rollout: dict[str, FailRecoveryTactileService] = {}
+        self._readers: list[FailRecoveryTactileService] = []
+        for manifest, root, rows in sources:
+            if not rows:
+                continue
+            reader = FailRecoveryTactileService(root, manifest, manifest_rows=rows)
+            for row in rows:
+                rollout_id = str(row["id"])
+                if rollout_id in self._by_rollout:
+                    raise ValueError(f"Duplicate rollout id across tactile readers: {rollout_id}")
+                self._by_rollout[rollout_id] = reader
+            self._readers.append(reader)
+
+    def has_rollout(self, rollout_id: str) -> bool:
+        return rollout_id in self._by_rollout
+
+    def _reader(self, rollout_id: str) -> FailRecoveryTactileService:
+        try:
+            return self._by_rollout[rollout_id]
+        except KeyError as exc:
+            raise KeyError("tactile rollout not found") from exc
+
+    def frame(self, rollout_id: str, camera: str, video_frame: int) -> dict[str, Any]:
+        return self._reader(rollout_id).frame(rollout_id, camera, video_frame)
+
+    def series(self, rollout_id: str, camera: str) -> dict[str, Any]:
+        return self._reader(rollout_id).series(rollout_id, camera)
+
+    def sprite(self, rollout_id: str, camera: str, video_frame: int, kind: str) -> bytes:
+        return self._reader(rollout_id).sprite(rollout_id, camera, video_frame, kind)
+
+    def image(self, rollout_id: str, finger: str, event_id: str, kind: str) -> bytes:
+        return self._reader(rollout_id).image(rollout_id, finger, event_id, kind)
+
+    def cache_stats(self) -> dict[str, Any]:
+        return {
+            "readers": len(self._readers),
+            "sources": [reader.cache_stats() for reader in self._readers],
+        }

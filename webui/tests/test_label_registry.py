@@ -47,37 +47,58 @@ class LabelRegistryTest(unittest.TestCase):
         self.assertEqual(reread.get(3)["color"], "#aabbcc")
         self.assertEqual([row["event_key"] for row in self.app.annotations_by_rollout()["failure_001"]], [3])
 
-    def test_append_only_ids_and_immutable_scope(self):
+    def test_registered_labels_work_on_any_rollout(self):
+        self.app.save_rollout_annotations("success_001", [
+            {"event_key": 3, "start_frame": 2, "end_frame": 4},
+            {"event_key": 4, "start_frame": 5, "end_frame": 7},
+        ])
+        self.assertEqual(
+            [event["event_key"] for event in self.app.annotations_by_rollout()["success_001"]],
+            [3, 4],
+        )
         data = self.payload()
         data["labels"].append({
             "id": 5, "name": "Contact lost", "description": "",
-            "color": "#123456", "scope": "failure", "active": True,
+            "color": "#123456",
         })
         self.app.labels.update(data)
+        self.app.save_rollout_annotations("success_001", [
+            {"event_key": 5, "start_frame": 8, "end_frame": 10},
+        ])
+        self.assertEqual(self.app.annotations_by_rollout()["success_001"][0]["event_key"], 5)
         with self.assertRaisesRegex(ValueError, "existing IDs"):
             self.app.labels.update({
                 **self.payload(), "labels": self.payload()["labels"][:4]
             })
-        bad = self.payload()
-        bad["labels"][2]["scope"] = "all"
-        with self.assertRaisesRegex(ValueError, "scope"):
-            self.app.labels.update(bad)
-        self.app.save_rollout_annotations("failure_001", [{"event_key": 5, "start_frame": 2, "end_frame": 4}])
-        with self.assertRaisesRegex(ValueError, "failure"):
-            self.app.save_rollout_annotations("success_001", [{"event_key": 5, "start_frame": 2, "end_frame": 4}])
 
-    def test_deactivated_existing_intervals_survive_but_new_ones_are_blocked(self):
-        self.app.save_rollout_annotations("failure_001", [{"event_key": 1, "start_frame": 1, "end_frame": 2}])
+    def test_old_failure_and_inactive_metadata_is_ignored(self):
         data = self.payload()
-        data["labels"][0]["active"] = False
-        data["labels"].append({
-            "id": 5, "name": "Disabled", "description": "",
-            "color": "#abcdef", "scope": "all", "active": False,
-        })
+        data["labels"][2]["scope"] = "failure"
+        data["labels"][2]["active"] = False
+        data["labels"][3]["scope"] = "failure"
         self.app.labels.update(data)
-        self.app.save_rollout_annotations("failure_001", [{"event_key": 1, "start_frame": 1, "end_frame": 3}])
-        with self.assertRaisesRegex(ValueError, "inactive"):
-            self.app.save_rollout_annotations("failure_001", [{"event_key": 5, "start_frame": 4, "end_frame": 5}])
+        self.assertNotIn("scope", self.app.labels.get(3))
+        self.assertNotIn("active", self.app.labels.get(3))
+        self.app.save_rollout_annotations("success_001", [
+            {"event_key": 3, "start_frame": 1, "end_frame": 3},
+            {"event_key": 4, "start_frame": 4, "end_frame": 6},
+        ])
+        self.assertEqual(len(self.app.annotations_by_rollout()["success_001"]), 2)
+
+    def test_local_registry_file_from_old_version_loads_without_restrictions(self):
+        config = self.root / "config/annotation_labels.json"
+        content = self.payload()
+        for label in content["labels"]:
+            label["scope"] = "failure"
+            label["active"] = False
+        config.parent.mkdir(parents=True, exist_ok=True)
+        config.write_text(json.dumps(content), encoding="utf-8")
+        self.app.labels = LabelRegistry(config)
+        self.assertTrue(all("scope" not in row and "active" not in row
+                            for row in self.payload()["labels"]))
+        self.app.save_rollout_annotations("success_001", [
+            {"event_key": 3, "start_frame": 1, "end_frame": 3}
+        ])
 
     def test_unregistered_historical_label_kept_but_not_coerced_on_save(self):
         seed = self.root / "outputs/usb_event_intervals/old/intervals.jsonl"
@@ -110,6 +131,9 @@ class LabelRegistryTest(unittest.TestCase):
         self.assertIn("function renderLabelSettings()", js)
         self.assertIn("function renderAnnotationLabelGuide()", js)
         self.assertIn("function labelMeta(id)", js)
+        self.assertNotIn('label.scope === "failure"', js)
+        self.assertNotIn("data-field=\"scope\"", js)
+        self.assertNotIn("data-field=\"active\"", js)
         self.assertIn("event.event_key = Number(event.event_key)", js)
         self.assertNotIn("LABEL_KEYS.indexOf(Number(event.event_key))", js)
 

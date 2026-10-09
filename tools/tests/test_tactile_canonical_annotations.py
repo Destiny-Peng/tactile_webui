@@ -18,29 +18,29 @@ class CanonicalMigrationTests(unittest.TestCase):
         return (dict(rollout_id=rid, event_key=key, start_frame=start, end_frame=end),
                 dict(source='test.json', source_event_index=0, source_failure_type='timeout_no_progress'))
 
-    def test_union_mapping_filter_and_exact_dedup(self):
+    def test_union_mapping_and_exact_dedup_without_outcome_filtering(self):
         inputs = [self.row('f', k) for k in (6,7,8,9,3,4)]
         inputs += [self.row('f',3,3,8), self.row('f',3,2,9), self.row('f',0)]
         inputs += [self.row('s',3), self.row('s',4), self.row('s',6)]
         events, summary, audit = merge_intervals(inputs, self.records)
         self.assertEqual(summary['exact_duplicates'],2)
-        self.assertEqual(summary['discarded_success_34'],2)
+        self.assertNotIn('discarded_success_34', summary)
         self.assertEqual(summary['background_records_ignored'],1)
-        self.assertEqual(len(events),7)
+        self.assertEqual(len(events),9)
         self.assertEqual({e['event_key'] for e in events},{1,2,3,4})
-        self.assertEqual(sum(e['event_key']==3 for e in events),3)
-        self.assertEqual(sum(len(e['provenance']) for e in events),9)
+        self.assertEqual(sum(e['event_key']==3 for e in events),4)
+        self.assertEqual(sum(len(e['provenance']) for e in events),11)
         self.assertTrue(any(e['rollout_id']=='s' and e['event_key']==2 for e in events))
-        self.assertTrue(all(e['rollout_id']=='f' for e in events if e['event_key'] in (3,4)))
+        self.assertEqual({e['event_key'] for e in events if e['rollout_id']=='s'}, {2,3,4})
         self.assertEqual(inputs[0][0]['event_key'],6)
 
-    def test_invalid_frames_and_missing_authority_fail_closed(self):
+    def test_invalid_frames_fail_closed_but_outcome_does_not_gate_labels(self):
         for start,end in ((-1,2),(4,2),(0,30),(1.5,2),(True,2)):
             with self.subTest(start=start,end=end), self.assertRaises(ValueError):
                 merge_intervals([self.row('f',6,start,end)],self.records)
         self.records['f']['ground_truth_outcome']='unknown'
-        with self.assertRaises(ValueError):
-            merge_intervals([self.row('f',3)],self.records)
+        events, _, _ = merge_intervals([self.row('f',3)],self.records)
+        self.assertEqual(events[0]['event_key'], 3)
         with self.assertRaises(ValueError):
             merge_intervals([self.row('missing',6)],self.records)
 
@@ -60,7 +60,7 @@ class CanonicalMigrationTests(unittest.TestCase):
         summary=json.loads((path/'migration_summary.json').read_text())
         self.assertEqual(len(events),summary['output_intervals'])
         self.assertEqual(summary['input_intervals'],summary['output_intervals']+summary['exact_duplicates']+
-                         summary['discarded_success_34']+summary['background_records_ignored'])
+                         summary.get('discarded_success_34', 0)+summary['background_records_ignored'])
         for key,stats in summary['final'].items():
             chosen=[e for e in events if e['event_key']==int(key)]
             self.assertEqual(len(chosen),stats['intervals'])

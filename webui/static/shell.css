@@ -1672,3 +1672,31 @@ body.theme-dark input {
   border-radius: 5px;
   font-size: .52rem;
 }
+/* Project label registry: compact explanations without crowding the timeline. */
+.annotation-label-guide { display: grid; gap: 5px; margin: 10px 0 4px; }
+.annotation-label-definition { display: flex; align-items: baseline; gap: 7px; font-size: .62rem; line-height: 1.4; }
+.annotation-label-definition .label-mark { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 99px; }
+.annotation-label-definition strong { white-space: nowrap; }
+.annotation-label-definition .label-explanation { color: var(--muted); overflow-wrap: anywhere; }
+.annotation-label-definition.ineligible { opacity: .55; }
+.active-label-help { color: var(--muted); font-size: .62rem; line-height: 1.5; margin-top: 10px; }
+.active-label-help.warning { color: var(--failure); }
+.label-registry-intro { max-width: 850px; margin: 8px 0 0; font-size: .68rem; line-height: 1.5; }
+.label-registry-panel { margin-top: 15px; }
+.label-registry-rows { margin-top: 16px; display: grid; gap: 8px; }
+.label-registry-row { display: grid; grid-template-columns: 46px minmax(140px,1fr) minmax(200px,2fr) 95px 105px 60px; align-items: start; gap: 10px; padding: 12px; border: 1px solid var(--line-soft); border-radius: 9px; }
+.label-registry-row > label, .label-registry-row > div { display: grid; gap: 5px; min-width: 0; }
+.label-registry-row label > span, .label-registry-row .label-field-title { color: var(--muted); font-size: .6rem; font-weight: 650; }
+.label-registry-row input:not([type="checkbox"]), .label-registry-row select, .label-registry-row textarea { width: 100%; min-height: 34px; padding: 6px 8px; font-size: .7rem; }
+.label-registry-row input[type="color"] { min-height: 34px; padding: 2px; cursor: pointer; }
+.label-registry-row input[type="checkbox"] { justify-self: start; width: 18px; height: 18px; margin-top: 7px; }
+.label-registry-row .label-id { font: 750 .8rem/35px ui-monospace,monospace; }
+.label-registry-row .label-scope-static { font-size: .69rem; line-height: 34px; white-space: nowrap; }
+body.theme-dark .label-registry-row { border-color: var(--line); background: var(--surface-raised); }
+@media (max-width: 1020px) {
+  .label-registry-row { grid-template-columns: 46px minmax(130px,1fr) minmax(200px,2fr); }
+}
+@media (max-width: 600px) {
+  .label-registry-row { grid-template-columns: 38px 1fr; }
+  .label-registry-row > label:nth-child(3) { grid-column: 2; }
+}

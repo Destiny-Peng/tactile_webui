@@ -24,6 +24,7 @@ def make_sqlite(path: Path):
                    "f6_json TEXT, raw_shape_json TEXT, deform_shape_json TEXT, raw_blob BLOB, deform_blob BLOB)")
         db.execute("CREATE TABLE synchronized_frames (frame_index INTEGER, elapsed_s REAL, "
                    "tick_wall_ns INTEGER, tick_mono_ns INTEGER, complete INTEGER, snapshot_json TEXT)")
+        db.execute("CREATE TABLE camera_frames (source TEXT, frame_index INTEGER)")
         for fid, finger in enumerate(FINGERS, 1):
             db.execute("INSERT INTO events VALUES (?, ?, ?, ?, ?, ?)",
                        (fid, f"tactile:right:{finger}", 1000 + fid, 2000 + fid, 3000 + fid, 1))
@@ -41,6 +42,8 @@ def make_sqlite(path: Path):
                 }
             db.execute("INSERT INTO synchronized_frames VALUES (?, ?, ?, ?, ?, ?)",
                        (frame_number, frame_number / 30, 1, 2, 1, json.dumps(snapshot)))
+            db.execute("INSERT INTO camera_frames VALUES (?, ?)",
+                       ("camera:realsense_color", frame_number))
         db.commit()
 
 
@@ -96,6 +99,29 @@ class OriginalSqliteTests(unittest.TestCase):
             self.assertEqual(db.read_bytes(), before)
             self.assertFalse((source / "ep01/frames.jsonl").exists())
             self.assertFalse((source / "ep01/tactile").exists())
+
+    def test_metadata_indexer_writes_only_tiny_manifest(self):
+        from tools.index_sqlite_dataset import index_dataset
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "viewer"
+            raw = Path(temp) / "raw_dataset"
+            db = add_raw_manifest(root, "old_setup", raw, "original-one")
+            (raw / "ep01/manifest.json").write_text(
+                json.dumps({"status": "complete", "task": "Insert USB", "episode_label": "ep01"})
+            )
+            before = db.read_bytes()
+            target = root / "datasets" / "new_raw" / "manifest.jsonl"
+            with mock.patch("tools.index_sqlite_dataset.video_probe", return_value={
+                "fps": 30.0, "frames": 3, "width": 320, "height": 240, "codec": "h264"
+            }):
+                indexed = index_dataset(raw, target, "new_raw")
+            self.assertEqual(indexed[0]["id"], "new_raw--ep01")
+            self.assertEqual(db.read_bytes(), before)
+            self.assertLess(target.stat().st_size, 4096)
+            self.assertTrue(target.with_suffix(".summary.json").is_file())
+            app = TactileApplication(root)
+            self.assertEqual(len(app.rollout_map()), 2)
+            self.assertEqual(app.tactile.frame("new_raw--ep01", "cam_high", 1)["matched_video_frame"], 1)
 
     def test_peer_manifests_and_independent_roots(self):
         with tempfile.TemporaryDirectory() as temp:

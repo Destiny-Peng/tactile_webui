@@ -459,9 +459,23 @@ class TactileApplication:
             seed = self.annotation_seed_path()
             rows = self._read_jsonl(seed) if seed is not None else []
             record_rows = self._record_annotation_rows()
-            edited_rollouts = {str(row.get("rollout_id") or "") for row in record_rows}
-            if edited_rollouts:
-                rows = [row for row in rows if str(row.get("rollout_id") or "") not in edited_rollouts]
+            # A saved sidecar with zero intervals is an explicit deletion,
+            # not permission to resurrect old seed intervals on next load.
+            touched_rollouts: set[str] = set()
+            for path in self.annotation_target_path().glob("*.tactile.json"):
+                try:
+                    record = json.loads(path.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    continue
+                if isinstance(record, dict) and isinstance(record.get("tactile_intervals"), list):
+                    touched_rollouts.add(
+                        str(record.get("rollout_id") or path.name.removesuffix(".tactile.json"))
+                    )
+            if touched_rollouts:
+                rows = [
+                    row for row in rows
+                    if str(row.get("rollout_id") or "") not in touched_rollouts
+                ]
                 rows.extend(record_rows)
                 return rows, self.annotation_target_path()
             return rows, seed
@@ -489,6 +503,44 @@ class TactileApplication:
                 )
             )
         return grouped
+
+    @staticmethod
+    def _review_fields(record: dict[str, Any]) -> dict[str, Any]:
+        """Extract optional LF3R-style rollout review without interval labels."""
+        data = record.get("annotation")
+        merged = dict(data) if isinstance(data, dict) else {}
+        for name in ("outcome_label", "review_status", "annotator", "confidence", "notes"):
+            if name in record:
+                merged[name] = record[name]
+        return merged
+
+    def _saved_annotation_reviews(self) -> dict[str, dict[str, Any]]:
+        """Preserve the existing sidecars; read legacy LF3R files as fallback."""
+        folder = self.annotation_target_path()
+        if not folder.is_dir():
+            return {}
+        reviews: dict[str, dict[str, Any]] = {}
+        for path in sorted(folder.glob("*.json")):
+            if path.name.endswith(".tactile.json"):
+                continue
+            try:
+                value = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if not isinstance(value, dict):
+                continue
+            rid = str(value.get("rollout_id") or path.stem)
+            reviews[rid] = self._review_fields(value)
+        for path in sorted(folder.glob("*.tactile.json")):
+            try:
+                value = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if not isinstance(value, dict):
+                continue
+            rid = str(value.get("rollout_id") or path.name.removesuffix(".tactile.json"))
+            reviews[rid] = {**reviews.get(rid, {}), **self._review_fields(value)}
+        return reviews
 
     def _validate_events(self, rollout_id: str, events: Any) -> list[dict[str, Any]]:
         if not isinstance(events, list):
@@ -533,8 +585,50 @@ class TactileApplication:
             event["event_id"] = f"{rollout_id}:event:{index}"
         return normalized
 
-    def save_rollout_annotations(self, rollout_id: str, events: Any) -> list[dict[str, Any]]:
+    def save_rollout_annotations(
+        self, rollout_id: str, events: Any, *, review: dict[str, Any] | None = None
+    ) -> list[dict[str, Any]]:
         normalized = self._validate_events(rollout_id, events)
+        if review is not None:
+            if not isinstance(review, dict):
+                raise ValueError("review must be an object")
+            permitted = {"outcome_label", "review_status", "annotator", "confidence", "notes"}
+            if not set(review).issubset(permitted):
+                raise ValueError("unknown rollout review field")
+            outcome = review.get("outcome_label")
+            if "outcome_label" in review and not (
+                outcome is None or (
+                    isinstance(outcome, str)
+                    and outcome in {"success", "failure", "recovered_success", "uncertain"}
+                )
+            ):
+                raise ValueError("invalid outcome_label")
+            status = review.get("review_status")
+            if "review_status" in review and not (
+                isinstance(status, str)
+                and status in {"unreviewed", "in_progress", "complete"}
+            ):
+                raise ValueError("invalid review_status")
+            if "annotator" in review and (
+                not isinstance(review["annotator"], str)
+                or len(review["annotator"].strip()) > 100
+            ):
+                raise ValueError("invalid annotator")
+            if "notes" in review and (
+                not isinstance(review["notes"], str) or len(review["notes"]) > 5000
+            ):
+                raise ValueError("invalid notes")
+            if "confidence" in review and review["confidence"] is not None and (
+                type(review["confidence"]) not in {int, float}
+                or not 0 <= review["confidence"] <= 1
+            ):
+                raise ValueError("confidence must be between 0 and 1")
+            # A newly asserted human outcome must carry its provenance.
+            if review.get("outcome_label") is not None and not str(
+                review.get("annotator") or ""
+            ).strip():
+                raise ValueError("Annotator is required for a reviewed outcome")
+
         target = self.annotation_record_path(rollout_id)
         with self._annotation_lock:
             previous: dict[str, Any] = {}
@@ -550,7 +644,16 @@ class TactileApplication:
                 **previous,
                 "schema_version": "tactile_intervals_v1",
                 "rollout_id": rollout_id,
-                "review_status": "complete" if normalized else "unreviewed",
+                "review_status": (
+                    (review or {}).get("review_status")
+                    or previous.get("review_status")
+                    or ("complete" if normalized else "unreviewed")
+                ),
+                **({
+                    key: value.strip() if key in {"annotator", "notes"} else value
+                    for key, value in (review or {}).items()
+                    if key != "review_status"
+                }),
                 "created_at": previous.get("created_at", now),
                 "updated_at": now,
                 "tactile_intervals": normalized,
@@ -560,12 +663,24 @@ class TactileApplication:
 
     def rollout_payload(self) -> dict[str, Any]:
         annotations = self.annotations_by_rollout()
+        reviews = self._saved_annotation_reviews()
         rows = []
         for original in self.load_rollouts():
             row = dict(original)
-            events = annotations.get(str(row.get("id")), [])
+            rid = str(row.get("id"))
+            events = annotations.get(rid, [])
+            review = {**self._review_fields(row), **reviews.get(rid, {})}
+            if review.get("outcome_label") not in {
+                "success", "failure", "recovered_success", "uncertain"
+            }:
+                review.pop("outcome_label", None)
+            status = review.get("review_status")
+            if status not in {"unreviewed", "in_progress", "complete"}:
+                status = "complete" if events else "unreviewed"
+            review["review_status"] = status
+            row["annotation"] = review
             row["annotation_events"] = events
-            row["annotation_status"] = "complete" if events else "unreviewed"
+            row["annotation_status"] = status
             rows.append(row)
         source = self.annotation_seed_path()
         return {
@@ -1037,12 +1152,21 @@ class TactileHandler(BaseHTTPRequestHandler):
                 return
             if path.startswith("/api/annotations/"):
                 rollout_id = path[len("/api/annotations/"):].strip("/")
-                events = self.app.save_rollout_annotations(rollout_id, payload.get("events"))
+                review = {
+                    name: payload[name]
+                    for name in ("outcome_label", "review_status", "annotator", "confidence", "notes")
+                    if name in payload
+                }
+                events = self.app.save_rollout_annotations(
+                    rollout_id, payload.get("events"), review=review or None
+                )
+                reviews = self.app._saved_annotation_reviews()
                 self.json_response(
                     HTTPStatus.OK,
                     {
                         "rollout_id": rollout_id,
                         "events": events,
+                        "annotation": reviews.get(rollout_id, {}),
                         "annotation_target": str(self.app.annotation_target_path().relative_to(self.app.root)),
                     },
                 )

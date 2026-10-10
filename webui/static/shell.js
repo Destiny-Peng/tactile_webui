@@ -142,7 +142,7 @@ function setGlobalStatus(ok, text) {
 function switchView(view, updateHash) {
   if (!byId("view-" + view)) return;
   if (state.view === "annotate" && view !== "annotate" && state.dirty) {
-    if (!window.confirm("Discard unsaved interval changes?")) return;
+    if (!window.confirm("Discard unsaved annotation changes?")) return;
     state.dirty = false;
   }
   state.view = view;
@@ -177,14 +177,15 @@ function populateTaskFilter() {
   select.value = tasks.indexOf(current) >= 0 ? current : "all";
 }
 function rolloutOutcome(record) {
-  return String(record && (record.ground_truth_outcome || record.annotation && record.annotation.outcome_label) || "unknown").trim().toLowerCase();
+  var outcome = record && record.annotation && record.annotation.outcome_label;
+  return String(outcome || (record && record.ground_truth_outcome) || "unknown").trim().toLowerCase();
 }
 function populateOutcomeFilter() {
   var select = byId("annotateOutcomeFilter");
   var previous = select.value || "all";
-  var expected = ["success", "failure"];
+  var expected = ["success", "failure", "recovered_success", "uncertain", "unknown"];
   var extra = Array.from(new Set(state.rollouts.map(rolloutOutcome))).filter(function (outcome) {
-    return expected.indexOf(outcome) < 0 && outcome !== "unknown";
+    return expected.indexOf(outcome) < 0;
   }).sort();
   var outcomes = expected.concat(extra);
   select.innerHTML = '<option value="all">All outcomes</option>' + outcomes.map(function (outcome) {
@@ -229,7 +230,7 @@ function renderRolloutList() {
   });
 }
 function maybeSelectRollout(id) {
-  if (state.dirty && id !== state.selectedId && !window.confirm("Discard unsaved interval changes?")) return;
+  if (state.dirty && id !== state.selectedId && !window.confirm("Discard unsaved annotation changes?")) return;
   selectRollout(id);
 }
 var CAMERA_ORDER = ["cam_high", "cam_wrist", "cam_left_wrist", "cam_right_wrist"];
@@ -351,6 +352,7 @@ function selectRollout(id) {
   state.selectedId = id;
   state.currentFrame = 0;
   state.events = (record.annotation_events || []).map(function (event) { return Object.assign({}, event); });
+  loadRolloutReviewForm(record);
   state.activeEvent = state.events.length ? 0 : null;
   state.dirty = false;
   state.tactileSeries = null;
@@ -377,6 +379,31 @@ function selectRollout(id) {
   updateFrameUi(0, true);
   updateNavigationButtons();
   setAnnotationMessage("", "");
+}
+function loadRolloutReviewForm(record) {
+  var annotation = record.annotation || {};
+  var reviewed = annotation.outcome_label || "";
+  var source = String(record.ground_truth_outcome || "unknown");
+  byId("annotateOutcomeLabel").value = reviewed;
+  byId("annotateSourceOutcome").textContent =
+    "Source manifest outcome: " + source +
+    (reviewed ? " · Human review: " + reviewed : " · No saved human outcome");
+  var reviewer = annotation.annotator || "";
+  if (!reviewer) { try { reviewer = sessionStorage.getItem("tactile.annotator") || ""; } catch (_) {} }
+  byId("annotateReviewer").value = reviewer;
+  byId("annotateReviewStatus").value = annotation.review_status || record.annotation_status || "unreviewed";
+  byId("annotateConfidence").value = annotation.confidence == null ? "" : String(annotation.confidence);
+  byId("annotateReviewNotes").value = annotation.notes || "";
+}
+function rolloutReviewPayload() {
+  var confidenceText = byId("annotateConfidence").value.trim();
+  return {
+    outcome_label: byId("annotateOutcomeLabel").value || null,
+    annotator: byId("annotateReviewer").value.trim(),
+    review_status: byId("annotateReviewStatus").value,
+    confidence: confidenceText === "" ? null : Number(confidenceText),
+    notes: byId("annotateReviewNotes").value
+  };
 }
 function renderAnnotateTimeline() {
   var record = selectedRollout();
@@ -686,15 +713,34 @@ function markDirty() { state.dirty = true; setAnnotationMessage("Unsaved changes
 function setAnnotationMessage(text, kind) { var node = byId("annotationMessage"); node.textContent = text || ""; node.className = "message" + (kind ? " " + kind : ""); }
 async function saveIntervals() {
   var record = selectedRollout(); if (!record) return;
+  var review = rolloutReviewPayload();
+  if (review.outcome_label && !review.annotator) {
+    setAnnotationMessage("Annotator is required when saving a reviewed outcome.", "error");
+    byId("annotateReviewer").focus();
+    return;
+  }
+  if (review.confidence !== null && !(review.confidence >= 0 && review.confidence <= 1)) {
+    setAnnotationMessage("Confidence must be between 0 and 1.", "error");
+    return;
+  }
   normalizeLocalEvents(); byId("saveIntervals").disabled = true; setAnnotationMessage("Saving…", "");
   try {
-    var payload = await jsonRequest("/api/annotations/" + encodeURIComponent(record.id), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ events: state.events }) });
+    var payload = await jsonRequest("/api/annotations/" + encodeURIComponent(record.id), {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(Object.assign({ events: state.events }, review))
+    });
     state.events = (payload.events || []).map(function (event) { return Object.assign({}, event); });
     record.annotation_events = state.events.map(function (event) { return Object.assign({}, event); });
-    record.annotation_status = state.events.length ? "complete" : "unreviewed";
-    state.annotationTarget = payload.annotation_target || state.annotationTarget; state.dirty = false;
-    renderIntervals(); renderAnnotateTimeline(); filterRollouts(); updateHeader();
-    setAnnotationMessage("Saved to " + (state.annotationTarget || "annotation file"), "success");
+    record.annotation = Object.assign({}, payload.annotation || {}, {
+      outcome_label: (payload.annotation || {}).outcome_label || null,
+    });
+    record.annotation_status = record.annotation.review_status || review.review_status;
+    state.annotationTarget = payload.annotation_target || state.annotationTarget;
+    try { if (review.annotator) sessionStorage.setItem("tactile.annotator", review.annotator); } catch (_) {}
+    state.dirty = false;
+    loadRolloutReviewForm(record);
+    renderIntervals(); renderAnnotateTimeline(); populateOutcomeFilter(); filterRollouts(); updateHeader();
+    setAnnotationMessage("Saved review and intervals to " + (state.annotationTarget || "annotation file"), "success");
   } catch (error) { setAnnotationMessage(error.message, "error"); }
   finally { byId("saveIntervals").disabled = false; }
 }
@@ -1154,6 +1200,15 @@ function bindEvents() {
     if (button) switchAnnotateCamera(button.dataset.camera);
   });
   byId("toggleRolloutSidebar").addEventListener("click", function () { setRolloutSidebarCollapsed(!state.sidebarCollapsed); });
+  byId("rolloutReviewForm").addEventListener("input", markDirty);
+  byId("rolloutReviewForm").addEventListener("change", markDirty);
+  byId("annotateOutcomeLabel").addEventListener("change", function () {
+    var record = selectedRollout();
+    var previous = record && record.annotation && record.annotation.outcome_label;
+    if (this.value && !previous && byId("annotateReviewStatus").value === "unreviewed") {
+      byId("annotateReviewStatus").value = "complete";
+    }
+  });
   byId("annotateF6Finger").addEventListener("change", renderAnnotateF6Curve); byId("annotatePlay").addEventListener("click", togglePlay); byId("annotateStepBack").addEventListener("click", function () { seekFrame(state.currentFrame - 1); }); byId("annotateStepForward").addEventListener("click", function () { seekFrame(state.currentFrame + 1); }); byId("annotateFrameSlider").addEventListener("input", function (event) { seekFrame(event.target.value); });
   byId("annotateVideo").addEventListener("play", function () { byId("annotatePlay").textContent = "Pause"; }); byId("annotateVideo").addEventListener("pause", function () { byId("annotatePlay").textContent = "Play"; }); byId("annotateVideo").addEventListener("timeupdate", function () { var record = selectedRollout(); if (record) updateFrameUi(Math.round(byId("annotateVideo").currentTime * (Number(record.fps) || 30)), false); });
   byId("addInterval").addEventListener("click", function () {
@@ -1185,6 +1240,7 @@ function bindEvents() {
     if (state.view !== "annotate" || isTypingTarget(event.target)) return;
     if (event.key === " ") { event.preventDefault(); togglePlay(); return; } if (event.key === ",") { event.preventDefault(); navigateRollout(-1); return; } if (event.key === ".") { event.preventDefault(); navigateRollout(1); return; }
     if (event.key === "ArrowLeft") { event.preventDefault(); seekFrame(state.currentFrame - 1); return; } if (event.key === "ArrowRight") { event.preventDefault(); seekFrame(state.currentFrame + 1); return; }
+    if (event.key.toLowerCase() === "s") { event.preventDefault(); saveIntervals(); return; }
     if (event.key === "ArrowUp" && state.events.length) { event.preventDefault(); state.activeEvent = state.activeEvent == null ? 0 : Math.max(0,state.activeEvent-1); renderIntervals(); renderAnnotateTimeline(); return; }
     if (event.key === "ArrowDown" && state.events.length) { event.preventDefault(); state.activeEvent = state.activeEvent == null ? 0 : Math.min(state.events.length-1,state.activeEvent+1); renderIntervals(); renderAnnotateTimeline(); return; }
     if (["1","2","3","4"].indexOf(event.key) >= 0) { event.preventDefault(); setActiveEventType(Number(event.key)); return; } if (event.key.toLowerCase() === "q") { event.preventDefault(); setActiveBoundary("start"); return; } if (event.key.toLowerCase() === "w") { event.preventDefault(); setActiveBoundary("end"); }

@@ -85,11 +85,11 @@ The synchronized tactile diagnostic viewer remains directly available at `http:/
 
 ## Annotation schema
 
-The annotator uses a project-local label registry in `config/annotation_labels.json` (editable in **Settings → Annotation labels**). Names, descriptions, colors and active status drive Annotate, Results, and Analysis. Label IDs are stable: editing their presentation does not rewrite annotation records or change experiment targets.
+The annotator uses a project-local label registry in `config/annotation_labels.json` (editable in **Settings → Annotation labels**). Names, descriptions and colors drive Annotate, Results, and Analysis. Label IDs are stable: editing their presentation does not rewrite annotation records or change experiment targets.
 
-The initial labels are **1 Success**, **2 Failure**, **3 Dropped object**, and **4 Wrong object**. Labels 3/4 are restricted to rollouts with authoritative `ground_truth_outcome=failure`. The other two describe local action intervals, not necessarily the final rollout outcome.
+The initial labels are **1 Success**, **2 Failure**, **3 Dropped object**, and **4 Wrong object**. **All registered labels can be annotated on any rollout**, regardless of final outcome, including unknown outcomes. Local interval labels do not imply the rollout's final result.
 
-Add new label IDs through Settings and choose `All` or `Failure only` before first save. Existing IDs and their eligibility scopes cannot be removed or changed; turn off **Active** to hide a label from new annotation choices while retaining previously saved intervals. An unregistered historical ID is shown rather than coerced into Success, but cannot be saved until registered or explicitly reassigned. Avoid repurposing an existing ID for a new semantic concept.
+Add new label IDs through Settings, or edit their names, descriptions and colors. The UI has **no per-outcome, failure-only, or active/inactive label restrictions**; existing legacy `scope`/`active` registry fields are ignored. Existing IDs cannot be deleted or reused, preserving historical annotation semantics. An unregistered historical ID is shown rather than coerced into Success, but must be registered or explicitly reassigned before saving.
 
 The backend exposes `GET/POST /api/labels`. The label registry is checked by the server when saving intervals. This is a UI annotation schema, not an automatic mapping to training targets: downstream 0/1/2 online GT or other model labels remain defined by experiment code.
 

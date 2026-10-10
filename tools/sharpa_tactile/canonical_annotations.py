@@ -28,16 +28,11 @@ def validate_event(event, record):
     total = record['total_frames']
     if type(start) is not int or type(end) is not int or not 0 <= start <= end < total:
         raise ValueError(f'Invalid closed frame interval (total={total}): {event}')
-    outcome = record.get('ground_truth_outcome')
-    if outcome not in ('success', 'failure'):
-        raise ValueError(f'Missing authoritative outcome: {record["id"]}')
-    if key in (3, 4) and outcome != 'failure':
-        raise ValueError(f'3/4 on non-failure rollout: {event}')
 
 
 def merge_intervals(inputs, records):
     """Inputs are (raw event, source reference); dedup AFTER mapping, per rollout."""
-    merged = {}; before = Counter(); mapped = Counter(); dropped = []; duplicates = []
+    merged = {}; before = Counter(); mapped = Counter(); duplicates = []
     background = []; eligible = []
     for raw, source in inputs:
         rid = raw['rollout_id']; old = raw['event_key']
@@ -54,8 +49,6 @@ def merge_intervals(inputs, records):
         mapped[key] += 1
         event = dict(rollout_id=rid, event_key=key, label=LABELS[key],
                      start_frame=raw['start_frame'], end_frame=raw['end_frame'])
-        if key in (3, 4) and records[rid].get('ground_truth_outcome') == 'success':
-            dropped.append(dict(event, provenance=provenance)); continue
         validate_event(event, records[rid])
         identity = (rid, key, event['start_frame'], event['end_frame'])
         eligible.append(identity)
@@ -85,11 +78,10 @@ def merge_intervals(inputs, records):
                          intervals=sum(e['event_key'] == k for e in events)) for k in LABELS}
     summary = dict(before_label_intervals={str(k): before[k] for k in LEGACY_MAPPING},
                    after_mapping_before_filter={str(k): mapped[k] for k in LABELS},
-                   discarded_success_34=len(dropped), discarded_success_34_by_label={str(k): sum(e['event_key']==k for e in dropped) for k in (3,4)},
                    background_records_ignored=len(background), exact_duplicates=len(duplicates), final=final,
                    input_intervals=sum(before.values()), output_intervals=len(events),
                    annotated_rollouts=len({e['rollout_id'] for e in events}))
-    return events, summary, dict(discarded_success_34=dropped, exact_duplicates=duplicates, background=background)
+    return events, summary, dict(exact_duplicates=duplicates, background=background)
 
 
 def migrate(args):

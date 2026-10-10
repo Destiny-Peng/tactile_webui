@@ -286,6 +286,22 @@ class WorkspaceAnnotationTest(unittest.TestCase):
         self.assertEqual(updated["annotation"]["outcome_label"], "recovered_success")
         self.assertEqual(updated["annotation"]["annotator"], "reviewer_A")
 
+    def test_review_edit_preserves_legacy_confidence_without_requiring_it(self):
+        temporary, app = self.make_app()
+        self.addCleanup(temporary.cleanup)
+        app.save_rollout_annotations("usb_001", [], review={
+            "outcome_label": "success", "annotator": "r1",
+            "review_status": "in_progress", "confidence": 0.4,
+        })
+        app.save_rollout_annotations("usb_001", [], review={
+            "outcome_label": "failure", "annotator": "r1",
+            "review_status": "complete", "notes": "Confirmed failure",
+        })
+        record = json.loads(app.annotation_record_path("usb_001").read_text())
+        self.assertEqual(record["confidence"], 0.4)
+        self.assertEqual(record["review_status"], "complete")
+        self.assertEqual(record["outcome_label"], "failure")
+
     def test_review_without_intervals_can_be_complete(self):
         temporary, app = self.make_app()
         self.addCleanup(temporary.cleanup)
@@ -361,10 +377,14 @@ class WorkspaceAnnotationTest(unittest.TestCase):
         html = (static / "index.html").read_text(encoding="utf-8")
         js = (static / "shell.js").read_text(encoding="utf-8")
         for ident in ("annotateOutcomeLabel", "annotateReviewer",
-                      "annotateReviewStatus", "annotateConfidence",
-                      "annotateReviewNotes", "annotateSourceOutcome"):
+                      "annotateReviewStatus", "annotateReviewNotes",
+                      "annotateSourceOutcome"):
             self.assertIn(f'id="{ident}"', html)
             self.assertIn(f'byId("{ident}")', js)
+        self.assertNotIn('id="annotateConfidence"', html)
+        self.assertNotIn('byId("annotateConfidence")', js)
+        self.assertNotIn('<select id="annotateReviewStatus"', html)
+        self.assertIn('review_status: "complete"', js)
         self.assertIn("loadRolloutReviewForm(record)", js)
         self.assertIn("rolloutReviewPayload()", js)
 

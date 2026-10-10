@@ -595,13 +595,19 @@ class TactileApplication:
             permitted = {"outcome_label", "review_status", "annotator", "confidence", "notes"}
             if not set(review).issubset(permitted):
                 raise ValueError("unknown rollout review field")
-            if "outcome_label" in review and review["outcome_label"] not in {
-                None, "success", "failure", "recovered_success", "uncertain"
-            }:
+            outcome = review.get("outcome_label")
+            if "outcome_label" in review and not (
+                outcome is None or (
+                    isinstance(outcome, str)
+                    and outcome in {"success", "failure", "recovered_success", "uncertain"}
+                )
+            ):
                 raise ValueError("invalid outcome_label")
-            if "review_status" in review and review["review_status"] not in {
-                "unreviewed", "in_progress", "complete"
-            }:
+            status = review.get("review_status")
+            if "review_status" in review and not (
+                isinstance(status, str)
+                and status in {"unreviewed", "in_progress", "complete"}
+            ):
                 raise ValueError("invalid review_status")
             if "annotator" in review and (
                 not isinstance(review["annotator"], str)

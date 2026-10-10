@@ -46,7 +46,7 @@
           <div class="filter-grid">
             <label><span>Task</span><select id="annotateTaskFilter"><option value="all">All tasks</option></select></label>
             <label><span>Outcome</span><select id="annotateOutcomeFilter"><option value="all">All outcomes</option><option value="success">Success</option><option value="failure">Failure</option></select></label>
-            <label><span>Review</span><select id="annotateReviewFilter"><option value="all">All states</option><option value="complete">Complete</option><option value="unreviewed">Unreviewed</option></select></label>
+            <label><span>Review</span><select id="annotateReviewFilter"><option value="all">All states</option><option value="complete">Complete</option><option value="in_progress">In progress</option><option value="unreviewed">Unreviewed</option></select></label>
           </div>
           <div id="annotateRolloutList" class="rollout-list"></div>
           <button id="toggleRolloutSidebar" class="review-queue-toggle" type="button" aria-controls="annotateSidebar" aria-expanded="true" aria-label="Collapse rollout queue" title="Collapse rollout queue">‹</button>
@@ -117,6 +117,33 @@
                 <span><kbd>1–4</kbd> label</span><span><kbd>Q</kbd> start</span><span><kbd>W</kbd> end</span>
                 <span><kbd>↑/↓</kbd> interval</span><span><kbd>, / .</kbd> rollout</span><span><kbd>Space</kbd> play</span>
               </div>
+              <div class="rollout-review-form" id="rolloutReviewForm">
+                <p class="eyebrow">ROLLOUT REVIEW</p>
+                <label class="rollout-review-field"><span>Final outcome</span>
+                  <select id="annotateOutcomeLabel">
+                    <option value="">Not reviewed · use source outcome</option>
+                    <option value="success">Clean Success</option>
+                    <option value="failure">Failure</option>
+                    <option value="recovered_success">Recovered Success</option>
+                    <option value="uncertain">Uncertain</option>
+                  </select>
+                </label>
+                <p id="annotateSourceOutcome" class="muted rollout-review-source"></p>
+                <div class="rollout-review-two">
+                  <label class="rollout-review-field"><span>Annotator</span><input id="annotateReviewer" maxlength="100" placeholder="Reviewer ID"></label>
+                  <label class="rollout-review-field"><span>Review status</span>
+                    <select id="annotateReviewStatus">
+                      <option value="complete">Complete</option>
+                      <option value="in_progress">In progress</option>
+                      <option value="unreviewed">Unreviewed</option>
+                    </select>
+                  </label>
+                </div>
+                <label class="rollout-review-field"><span>Confidence (optional, 0–1)</span><input id="annotateConfidence" type="number" min="0" max="1" step="0.01" placeholder="Not set"></label>
+                <label class="rollout-review-field"><span>Review notes (optional)</span><textarea id="annotateReviewNotes" maxlength="5000" rows="2" placeholder="Outcome evidence or uncertainty…"></textarea></label>
+                <p class="rollout-review-source muted">This final outcome is separate from the Success/Failure intervals below. The original manifest is never modified.</p>
+              </div>
+              <div class="rollout-review-divider"><strong>Action intervals</strong><span class="muted">Success / Failure / other event labels</span></div>
               <div id="annotationLabelGuide" class="annotation-label-guide" aria-label="Annotation label definitions"></div>
               <div class="annotation-actions"><button id="addInterval" class="ghost-button" type="button">+ Add interval</button><button id="saveIntervals" class="save-button" type="button">Save</button></div>
               <div id="intervalList" class="interval-list"></div>

@@ -87,7 +87,7 @@ The synchronized tactile diagnostic viewer remains directly available at `http:/
 
 The annotator uses a project-local label registry in `config/annotation_labels.json` (editable in **Settings → Annotation labels**). Names, descriptions and colors drive Annotate, Results, and Analysis. Label IDs are stable: editing their presentation does not rewrite annotation records or change experiment targets.
 
-The initial labels are **1 Success**, **2 Failure**, **3 Dropped object**, and **4 Wrong object**. **All registered labels can be annotated on any rollout**, regardless of final outcome, including unknown outcomes. Local interval labels do not imply the rollout's final result.
+The initial **action-interval** labels are **1 Success**, **2 Failure**, **3 Dropped object**, and **4 Wrong object**. All interval labels can be applied regardless of the rollout's final result. **Final rollout outcome is separate**, as in LF3R: Clean Success, Failure, Recovered Success, or Uncertain, plus annotator, review status, optional confidence and notes. The source manifest's `ground_truth_outcome` stays unchanged; an explicitly saved human outcome takes priority in the WebUI filter and list while both source and reviewed outcomes remain visible.
 
 Add new label IDs through Settings, or edit their names, descriptions and colors. The UI has **no per-outcome, failure-only, or active/inactive label restrictions**; existing legacy `scope`/`active` registry fields are ignored. Existing IDs cannot be deleted or reused, preserving historical annotation semantics. An unregistered historical ID is shown rather than coerced into Success, but must be registered or explicitly reassigned before saving.
 
@@ -107,7 +107,7 @@ Existing `<rollout-id>.json` LF3R records can coexist beside the tactile sidecar
 outputs/usb_event_intervals/*/intervals.jsonl
 ```
 
-That historical file is loaded as a **read-only seed**. On the first edit, all seed records are copied into the standalone annotation target and only the new target is modified. The original experiment input is not overwritten.
+That historical file is loaded as a **read-only seed**. On the first edit, seed intervals are copied into the local sidecar along with the submitted rollout review. A deliberately empty interval list remains empty on subsequent reloads: prior seed events do not reappear. The original experiment input is not overwritten.
 
 Keyboard controls on Annotate:
 
@@ -117,6 +117,7 @@ Q / W           set active interval start / end to the current frame
 ↑ / ↓           previous / next active interval
 , / .           previous / next rollout
 ← / →           previous / next video frame
+S               save review and intervals
 Space           play / pause
 ```
 

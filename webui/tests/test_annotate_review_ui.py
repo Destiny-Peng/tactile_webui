@@ -64,6 +64,23 @@ class AnnotateReviewUITests(unittest.TestCase):
         self.assertIn('Math.ceil(points.length / 1400)', self.js)
         self.assertIn('await Promise.all(loads)', self.js)
 
+    def test_lf3r_shortcuts_and_auto_review_are_exposed(self):
+        self.assertIn('id="annotateSearch"', self.html)
+        self.assertIn('All keyboard shortcuts', self.html)
+        self.assertIn('<kbd>A</kbd> add interval', self.html)
+        self.assertIn('ten frames', self.html)
+        self.assertNotIn('id="annotateConfidence"', self.html)
+        self.assertNotIn('<select id="annotateReviewStatus"', self.html)
+        self.assertIn('review_status: "complete"', self.js)
+        self.assertIn('if (!event.repeat) saveIntervals()', self.js)
+        self.assertIn('if (!event.repeat) navigateRollout', self.js)
+        self.assertIn('step * (event.shiftKey ? 10 : 1)', self.js)
+        self.assertIn('byId("annotateSearch").focus()', self.js)
+        self.assertIn('if (!event.repeat) setActiveBoundary(', self.js)
+        self.assertIn('if (!event.repeat) setActiveEventType(', self.js)
+        self.assertIn('if (label) addInterval(label.id)', self.js)
+        self.assertIn('["range", "checkbox", "radio", "button", "submit", "reset"]', self.js)
+
     def test_stylesheet_has_no_leftover_merge_conflicts(self):
         for token in ('<<<<<<<', '=======', '>>>>>>>'):
             self.assertNotIn(token, self.css)

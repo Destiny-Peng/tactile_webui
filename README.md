@@ -222,3 +222,9 @@ The complete tactile experiment toolchain and launch scripts now live under `too
 Live tactile sidecars and canonical records/index now use `raw_failrecovery--<episode-directory>` IDs. 125 record pairs were migrated; 353 intervals on120 annotated rollouts are visible under the rebuilt152-rollout catalog, with5 empty records preserved. Labels and frame bounds unchanged; frame counts match in every case. Historical provenance and original LF3R annotations/results are retained.
 
 Backup, correspondence and audit: [annotation_id_alignment/20261009_200000](outputs/annotation_id_alignment/20261009_200000/README.md). The new manifest has80 corresponding rollout outcomes marked unknown; annotation outcomes were retained, and no manifest outcomes were inferred or changed. Failure-only labels3/4 still require a manifest failure outcome when saved.
+
+## Multimodal causal prefix outcome experiment (2026-10-09)
+
+Tactile / Tactile+RGB / Tactile+Pose / Tactile+RGB+Pose / RGB+Pose, seeds42–46. Full rollout final-outcome targets, rollout-meanBCE, causalGRU128. Includes frozenDeform/DINOv2ViT-S14 caches, measuredPose34D,87/19/19rolloutsplit,25checkpoints,fullper-framepredictions and125rolloutcurves. [Results and configuration](outputs/sharpa_multimodal_prefix_outcome/20261009_223000/README.md).
+
+Wrist camera 对照（15 个 RGB 模型重新训练，seeds42–46）：[实验报告](outputs/sharpa_multimodal_prefix_outcome_wrist/20261010_010000/README.md)。保持原 split 和非 RGB 输入，原 high camera 结果保留。

@@ -114,9 +114,18 @@
                 <span class="count-chip">Annotation IDs</span>
               </div>
               <div class="shortcut-grid">
-                <span><kbd>1–4</kbd> label</span><span><kbd>Q</kbd> start</span><span><kbd>W</kbd> end</span>
-                <span><kbd>↑/↓</kbd> interval</span><span><kbd>, / .</kbd> rollout</span><span><kbd>Space</kbd> play</span><span><kbd>S</kbd> save</span>
+                <span><kbd>1–9</kbd> registered label</span><span><kbd>Q</kbd> start</span><span><kbd>W</kbd> end</span>
+                <span><kbd>A</kbd> add interval</span><span><kbd>↑/↓</kbd> select interval</span><span><kbd>S</kbd> save</span>
               </div>
+              <details class="annotate-shortcut-details"><summary>All keyboard shortcuts</summary>
+                <div class="shortcut-grid">
+                  <span><kbd>Space</kbd> play/pause</span><span><kbd>← / →</kbd> one frame</span>
+                  <span><kbd>Shift</kbd> + <kbd>← / →</kbd> ten frames</span><span><kbd>, / .</kbd> previous/next rollout</span>
+                  <span><kbd>/</kbd> focus search</span><span><kbd>1–9</kbd> select registered interval label</span>
+                  <span><kbd>Q / W</kbd> set start/end</span><span><kbd>A</kbd> add interval</span>
+                  <span><kbd>↑ / ↓</kbd> active interval</span><span><kbd>S</kbd> save review and intervals</span>
+                </div>
+              </details>
               <div class="rollout-review-form" id="rolloutReviewForm">
                 <p class="eyebrow">ROLLOUT REVIEW</p>
                 <label class="rollout-review-field"><span>Final outcome</span>
@@ -129,17 +138,8 @@
                   </select>
                 </label>
                 <p id="annotateSourceOutcome" class="muted rollout-review-source"></p>
-                <div class="rollout-review-two">
-                  <label class="rollout-review-field"><span>Annotator</span><input id="annotateReviewer" maxlength="100" placeholder="Reviewer ID"></label>
-                  <label class="rollout-review-field"><span>Review status</span>
-                    <select id="annotateReviewStatus">
-                      <option value="complete">Complete</option>
-                      <option value="in_progress">In progress</option>
-                      <option value="unreviewed">Unreviewed</option>
-                    </select>
-                  </label>
-                </div>
-                <label class="rollout-review-field"><span>Confidence (optional, 0–1)</span><input id="annotateConfidence" type="number" min="0" max="1" step="0.01" placeholder="Not set"></label>
+                <label class="rollout-review-field"><span>Annotator</span><input id="annotateReviewer" maxlength="100" placeholder="Reviewer ID"></label>
+                <p id="annotateReviewStatus" class="rollout-review-source muted">Review: Unreviewed · Automatically Complete on save</p>
                 <label class="rollout-review-field"><span>Review notes (optional)</span><textarea id="annotateReviewNotes" maxlength="5000" rows="2" placeholder="Outcome evidence or uncertainty…"></textarea></label>
                 <p class="rollout-review-source muted">This final outcome is separate from the Success/Failure intervals below. The original manifest is never modified.</p>
               </div>

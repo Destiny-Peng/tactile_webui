@@ -1,0 +1,30 @@
+{
+  "schema_version": "tactile_intervals_v1",
+  "rollout_id": "raw_failrecovery--20261008_000616_usb_mixed_1007_0009",
+  "review_status": "complete",
+  "outcome_label": "failure",
+  "annotator": "Jacy",
+  "notes": "",
+  "created_at": "2026-10-10T21:24:51.741772+08:00",
+  "updated_at": "2026-10-10T21:24:51.741772+08:00",
+  "tactile_intervals": [
+    {
+      "event_key": 4,
+      "start_frame": 286,
+      "end_frame": 318,
+      "notes": "",
+      "event_index": 0,
+      "event_id": "raw_failrecovery--20261008_000616_usb_mixed_1007_0009:event:0",
+      "rollout_id": "raw_failrecovery--20261008_000616_usb_mixed_1007_0009"
+    },
+    {
+      "event_key": 3,
+      "start_frame": 319,
+      "end_frame": 361,
+      "notes": "",
+      "event_index": 1,
+      "event_id": "raw_failrecovery--20261008_000616_usb_mixed_1007_0009:event:1",
+      "rollout_id": "raw_failrecovery--20261008_000616_usb_mixed_1007_0009"
+    }
+  ]
+}

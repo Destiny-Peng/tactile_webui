@@ -1,0 +1,48 @@
+{
+  "schema_version": "tactile_intervals_v1",
+  "rollout_id": "raw_failrecovery--20261008_000917_usb_mixed_1007_0015",
+  "review_status": "complete",
+  "outcome_label": "success",
+  "annotator": "Jacy",
+  "notes": "",
+  "created_at": "2026-10-10T21:36:02.167563+08:00",
+  "updated_at": "2026-10-10T21:36:05.596806+08:00",
+  "tactile_intervals": [
+    {
+      "event_key": 4,
+      "start_frame": 186,
+      "end_frame": 227,
+      "notes": "",
+      "event_index": 0,
+      "event_id": "raw_failrecovery--20261008_000917_usb_mixed_1007_0015:event:0",
+      "rollout_id": "raw_failrecovery--20261008_000917_usb_mixed_1007_0015"
+    },
+    {
+      "event_key": 1,
+      "start_frame": 234,
+      "end_frame": 244,
+      "notes": "",
+      "event_index": 1,
+      "event_id": "raw_failrecovery--20261008_000917_usb_mixed_1007_0015:event:1",
+      "rollout_id": "raw_failrecovery--20261008_000917_usb_mixed_1007_0015"
+    },
+    {
+      "event_key": 1,
+      "start_frame": 244,
+      "end_frame": 274,
+      "notes": "",
+      "event_index": 2,
+      "event_id": "raw_failrecovery--20261008_000917_usb_mixed_1007_0015:event:2",
+      "rollout_id": "raw_failrecovery--20261008_000917_usb_mixed_1007_0015"
+    },
+    {
+      "event_key": 4,
+      "start_frame": 258,
+      "end_frame": 274,
+      "notes": "",
+      "event_index": 3,
+      "event_id": "raw_failrecovery--20261008_000917_usb_mixed_1007_0015:event:3",
+      "rollout_id": "raw_failrecovery--20261008_000917_usb_mixed_1007_0015"
+    }
+  ]
+}

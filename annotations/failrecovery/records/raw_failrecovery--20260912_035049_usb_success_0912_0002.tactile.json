@@ -102,7 +102,9 @@
       "source_record": "/mnt/hdd/qiuxia/pyr/tactile_webui/annotations/tactile_canonical/v1/records/raw_failrecovery--20260912_035049_usb_success_0912_0002.json",
       "stages": [
         "align"
-      ]
+      ],
+      "event_id": "raw_failrecovery--20260912_035049_usb_success_0912_0002:event:0",
+      "notes": ""
     },
     {
       "rollout_id": "raw_failrecovery--20260912_035049_usb_success_0912_0002",
@@ -125,7 +127,9 @@
       "source_record": "/mnt/hdd/qiuxia/pyr/tactile_webui/annotations/tactile_canonical/v1/records/raw_failrecovery--20260912_035049_usb_success_0912_0002.json",
       "stages": [
         "align"
-      ]
+      ],
+      "event_id": "raw_failrecovery--20260912_035049_usb_success_0912_0002:event:1",
+      "notes": ""
     },
     {
       "rollout_id": "raw_failrecovery--20260912_035049_usb_success_0912_0002",
@@ -148,9 +152,16 @@
       "source_record": "/mnt/hdd/qiuxia/pyr/tactile_webui/annotations/tactile_canonical/v1/records/raw_failrecovery--20260912_035049_usb_success_0912_0002.json",
       "stages": [
         "insert"
-      ]
+      ],
+      "event_id": "raw_failrecovery--20260912_035049_usb_success_0912_0002:event:2",
+      "notes": ""
     }
   ],
   "review_status": "complete",
-  "migration_source": "/mnt/hdd/qiuxia/pyr/tactile_webui/annotations/tactile_canonical/v1/records/raw_failrecovery--20260912_035049_usb_success_0912_0002.json"
+  "migration_source": "/mnt/hdd/qiuxia/pyr/tactile_webui/annotations/tactile_canonical/v1/records/raw_failrecovery--20260912_035049_usb_success_0912_0002.json",
+  "outcome_label": "success",
+  "annotator": "Jacy",
+  "notes": "",
+  "created_at": "2026-10-10T20:50:25.763347+08:00",
+  "updated_at": "2026-10-10T20:50:25.763347+08:00"
 }

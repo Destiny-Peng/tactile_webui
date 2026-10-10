@@ -177,13 +177,16 @@ function populateTaskFilter() {
   select.value = tasks.indexOf(current) >= 0 ? current : "all";
 }
 function rolloutOutcome(record) {
+  // Only a reviewed annotation is an outcome. Missing is NOT uncertain
+  // and must not inherit the manifest's historical/inferred result.
   var outcome = record && record.annotation && record.annotation.outcome_label;
-  return String(outcome || (record && record.ground_truth_outcome) || "unknown").trim().toLowerCase();
+  return ["success", "failure", "recovered_success", "uncertain"].indexOf(outcome) >= 0
+    ? outcome : "unlabeled";
 }
 function populateOutcomeFilter() {
   var select = byId("annotateOutcomeFilter");
   var previous = select.value || "all";
-  var expected = ["success", "failure", "recovered_success", "uncertain", "unknown"];
+  var expected = ["success", "failure", "recovered_success", "uncertain", "unlabeled"];
   var extra = Array.from(new Set(state.rollouts.map(rolloutOutcome))).filter(function (outcome) {
     return expected.indexOf(outcome) < 0;
   }).sort();
@@ -383,11 +386,10 @@ function selectRollout(id) {
 function loadRolloutReviewForm(record) {
   var annotation = record.annotation || {};
   var reviewed = annotation.outcome_label || "";
-  var source = String(record.ground_truth_outcome || "unknown");
   byId("annotateOutcomeLabel").value = reviewed;
-  byId("annotateSourceOutcome").textContent =
-    "Source manifest outcome: " + source +
-    (reviewed ? " · Human review: " + reviewed : " · No saved human outcome");
+  byId("annotateSourceOutcome").textContent = reviewed
+    ? "Saved annotation: " + reviewed
+    : "No annotated outcome saved for this rollout.";
   var reviewer = annotation.annotator || "";
   if (!reviewer) { try { reviewer = sessionStorage.getItem("tactile.annotator") || ""; } catch (_) {} }
   byId("annotateReviewer").value = reviewer;

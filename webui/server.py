@@ -669,7 +669,9 @@ class TactileApplication:
             row = dict(original)
             rid = str(row.get("id"))
             events = annotations.get(rid, [])
-            review = {**self._review_fields(row), **reviews.get(rid, {})}
+            # Outcome/review GT comes exclusively from migrated annotation
+            # records in annotations_path; never inherit manifest hints.
+            review = dict(reviews.get(rid, {}))
             if review.get("outcome_label") not in {
                 "success", "failure", "recovered_success", "uncertain"
             }:

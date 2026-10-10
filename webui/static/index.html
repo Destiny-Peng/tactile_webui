@@ -131,16 +131,14 @@
                 <label class="rollout-review-field"><span>Final outcome</span>
                   <select id="annotateOutcomeLabel">
                     <option value="">Unlabeled</option>
-                    <option value="success">Clean Success</option>
+                    <option value="success">Success</option>
                     <option value="failure">Failure</option>
-                    <option value="recovered_success">Recovered Success</option>
-                    <option value="uncertain">Uncertain</option>
                   </select>
                 </label>
                 <p id="annotateSourceOutcome" class="muted rollout-review-source"></p>
                 <label class="rollout-review-field"><span>Annotator</span><input id="annotateReviewer" maxlength="100" placeholder="Reviewer ID"></label>
                 <p id="annotateReviewStatus" class="rollout-review-source muted">Review: Unreviewed · Automatically Complete on save</p>
-                <label class="rollout-review-field"><span>Review notes (optional)</span><textarea id="annotateReviewNotes" maxlength="5000" rows="2" placeholder="Outcome evidence or uncertainty…"></textarea></label>
+                <label class="rollout-review-field"><span>Review notes (optional)</span><textarea id="annotateReviewNotes" maxlength="5000" rows="2" placeholder="Outcome notes…"></textarea></label>
                 <p class="rollout-review-source muted">This final outcome is separate from the Success/Failure intervals below. The original manifest is never modified.</p>
               </div>
               <div class="rollout-review-divider"><strong>Action intervals</strong><span class="muted">Success / Failure / other event labels</span></div>

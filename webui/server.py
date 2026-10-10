@@ -505,13 +505,43 @@ class TactileApplication:
         return grouped
 
     @staticmethod
-    def _review_fields(record: dict[str, Any]) -> dict[str, Any]:
-        """Extract optional LF3R-style rollout review without interval labels."""
+    def _binary_annotation_outcome(value: Any) -> str | None:
+        """Normalize ONLY a saved annotation outcome, never manifest metadata.
+
+        Existing migrated sidecars use ground_truth_outcome, while newer edits
+        use outcome_label. Neither success subtype is a separate UI class.
+        Unknown/uncertain values remain unlabeled rather than being guessed.
+        """
+        if not isinstance(value, str):
+            return None
+        return {
+            "success": "success",
+            "clean_success": "success",
+            "recovered_success": "success",
+            "failure": "failure",
+            "fail": "failure",
+            "terminal_failure": "failure",
+        }.get(value.strip().lower())
+
+    @classmethod
+    def _review_fields(cls, record: dict[str, Any]) -> dict[str, Any]:
+        """Read reviews exclusively from saved annotation files.
+
+        Migrated tactile sidecars have ground_truth_outcome (not outcome_label);
+        an explicit newer outcome_label, including null, takes precedence.
+        """
         data = record.get("annotation")
         merged = dict(data) if isinstance(data, dict) else {}
         for name in ("outcome_label", "review_status", "annotator", "confidence", "notes"):
             if name in record:
                 merged[name] = record[name]
+        if "outcome_label" in merged:
+            merged["outcome_label"] = cls._binary_annotation_outcome(merged["outcome_label"])
+        elif "ground_truth_outcome" in record or "ground_truth_outcome" in merged:
+            merged["outcome_label"] = cls._binary_annotation_outcome(
+                record.get("ground_truth_outcome", merged.get("ground_truth_outcome"))
+            )
+        merged.pop("ground_truth_outcome", None)
         return merged
 
     def _saved_annotation_reviews(self) -> dict[str, dict[str, Any]]:
@@ -599,7 +629,7 @@ class TactileApplication:
             if "outcome_label" in review and not (
                 outcome is None or (
                     isinstance(outcome, str)
-                    and outcome in {"success", "failure", "recovered_success", "uncertain"}
+                    and outcome in {"success", "failure"}
                 )
             ):
                 raise ValueError("invalid outcome_label")
@@ -672,9 +702,7 @@ class TactileApplication:
             # Outcome/review GT comes exclusively from migrated annotation
             # records in annotations_path; never inherit manifest hints.
             review = dict(reviews.get(rid, {}))
-            if review.get("outcome_label") not in {
-                "success", "failure", "recovered_success", "uncertain"
-            }:
+            if review.get("outcome_label") not in {"success", "failure"}:
                 review.pop("outcome_label", None)
             status = review.get("review_status")
             if status not in {"unreviewed", "in_progress", "complete"}:

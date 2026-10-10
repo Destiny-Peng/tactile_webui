@@ -459,9 +459,23 @@ class TactileApplication:
             seed = self.annotation_seed_path()
             rows = self._read_jsonl(seed) if seed is not None else []
             record_rows = self._record_annotation_rows()
-            edited_rollouts = {str(row.get("rollout_id") or "") for row in record_rows}
-            if edited_rollouts:
-                rows = [row for row in rows if str(row.get("rollout_id") or "") not in edited_rollouts]
+            # A saved sidecar with zero intervals is an explicit deletion,
+            # not permission to resurrect old seed intervals on next load.
+            touched_rollouts: set[str] = set()
+            for path in self.annotation_target_path().glob("*.tactile.json"):
+                try:
+                    record = json.loads(path.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    continue
+                if isinstance(record, dict) and isinstance(record.get("tactile_intervals"), list):
+                    touched_rollouts.add(
+                        str(record.get("rollout_id") or path.name.removesuffix(".tactile.json"))
+                    )
+            if touched_rollouts:
+                rows = [
+                    row for row in rows
+                    if str(row.get("rollout_id") or "") not in touched_rollouts
+                ]
                 rows.extend(record_rows)
                 return rows, self.annotation_target_path()
             return rows, seed

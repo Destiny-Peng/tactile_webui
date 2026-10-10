@@ -28,14 +28,16 @@ class AnnotateReviewUITests(unittest.TestCase):
         task = self.html.split('<section class="task-header">')[1].split('</section>')[0]
         self.assertNotIn('toggleRolloutSidebar', task)
 
-    def test_lf3r_outcome_filter_is_present_and_uses_rollout_result(self):
+    def test_lf3r_outcome_filter_uses_migrated_annotation_only(self):
         self.assertIn('id="annotateOutcomeFilter"', self.html)
         self.assertIn('<option value="success">Success</option>', self.html)
         self.assertIn('<option value="failure">Failure</option>', self.html)
         self.assertIn('id="annotateReviewFilter"', self.html)
         self.assertIn('id="annotateTaskFilter"', self.html)
         self.assertIn('function rolloutOutcome(record)', self.js)
-        self.assertIn('record.ground_truth_outcome', self.js)
+        self.assertNotIn('record.ground_truth_outcome', self.js)
+        self.assertIn('return ["success", "failure", "recovered_success", "uncertain"]', self.js)
+        self.assertIn('"unlabeled"', self.js)
         self.assertIn('(outcome === "all" || rolloutOutcome(record) === outcome)', self.js)
         self.assertIn('populateOutcomeFilter(); filterRollouts()', self.js)
         self.assertIn('byId("annotateOutcomeFilter").addEventListener("change", filterRollouts)', self.js)

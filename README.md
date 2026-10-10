@@ -109,17 +109,22 @@ outputs/usb_event_intervals/*/intervals.jsonl
 
 That historical file is loaded as a **read-only seed**. On the first edit, seed intervals are copied into the local sidecar along with the submitted rollout review. A deliberately empty interval list remains empty on subsequent reloads: prior seed events do not reappear. The original experiment input is not overwritten.
 
-Keyboard controls on Annotate:
+Keyboard controls on Annotate (matching LF3R where the tactile interval schema permits):
 
 ```text
-1 / 2 / 3 / 4   select the corresponding label IDs
-Q / W           set active interval start / end to the current frame
+1–9             select a registered interval label (1–4 built in)
+Q / W           set active interval start / end at current frame
+A               add interval at current frame (reuse active label)
 ↑ / ↓           previous / next active interval
+← / →           step 1 video frame
+Shift + ← / →   step 10 video frames
 , / .           previous / next rollout
-← / →           previous / next video frame
-S               save review and intervals
+/               focus rollout search
 Space           play / pause
+S               save rollout review and intervals; review status auto-completes
 ```
+
+Shortcuts are disabled when typing in text, numeric and selection inputs, but stay active after dragging the video progress slider. Unlike LF3R's four-point failure-event annotation (Q/W/E/R), the tactile schema has only an interval start/end, so E/R have no equivalent timestamp fields. The final outcome, annotator and optional notes remain editable; review status is set to `complete` automatically on save. Confidence is no longer displayed or submitted; any historical confidence values remain in existing sidecars.
 
 ## Results and diagnostics
 

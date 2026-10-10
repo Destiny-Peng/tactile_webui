@@ -60,8 +60,11 @@ function formatDate(value) {
 }
 function isTypingTarget(target) {
   if (!target) return false;
-  if (target.isContentEditable) return true;
-  return ["INPUT", "TEXTAREA", "SELECT"].indexOf(target.tagName) >= 0;
+  if (target.isContentEditable || ["TEXTAREA", "SELECT"].indexOf(target.tagName) >= 0) return true;
+  if (target.tagName !== "INPUT") return false;
+  // LF3R: frame-slider focus must not steal global shortcuts after seeking.
+  return ["range", "checkbox", "radio", "button", "submit", "reset"]
+    .indexOf(String(target.type || "text").toLowerCase()) < 0;
 }
 function labelMeta(id) { return state.labels.find(function (row) { return row.id === Number(id); }) || null; }
 function labelName(id) { var meta = labelMeta(id); return meta ? meta.name : "Unknown " + id; }
@@ -393,17 +396,16 @@ function loadRolloutReviewForm(record) {
   var reviewer = annotation.annotator || "";
   if (!reviewer) { try { reviewer = sessionStorage.getItem("tactile.annotator") || ""; } catch (_) {} }
   byId("annotateReviewer").value = reviewer;
-  byId("annotateReviewStatus").value = annotation.review_status || record.annotation_status || "unreviewed";
-  byId("annotateConfidence").value = annotation.confidence == null ? "" : String(annotation.confidence);
+  var status = annotation.review_status || record.annotation_status || "unreviewed";
+  byId("annotateReviewStatus").textContent = "Review: " + status
+    + " · Automatically Complete on save";
   byId("annotateReviewNotes").value = annotation.notes || "";
 }
 function rolloutReviewPayload() {
-  var confidenceText = byId("annotateConfidence").value.trim();
   return {
     outcome_label: byId("annotateOutcomeLabel").value || null,
     annotator: byId("annotateReviewer").value.trim(),
-    review_status: byId("annotateReviewStatus").value,
-    confidence: confidenceText === "" ? null : Number(confidenceText),
+    review_status: "complete",
     notes: byId("annotateReviewNotes").value
   };
 }
@@ -719,10 +721,6 @@ async function saveIntervals() {
   if (review.outcome_label && !review.annotator) {
     setAnnotationMessage("Annotator is required when saving a reviewed outcome.", "error");
     byId("annotateReviewer").focus();
-    return;
-  }
-  if (review.confidence !== null && !(review.confidence >= 0 && review.confidence <= 1)) {
-    setAnnotationMessage("Confidence must be between 0 and 1.", "error");
     return;
   }
   normalizeLocalEvents(); byId("saveIntervals").disabled = true; setAnnotationMessage("Saving…", "");
@@ -1204,13 +1202,6 @@ function bindEvents() {
   byId("toggleRolloutSidebar").addEventListener("click", function () { setRolloutSidebarCollapsed(!state.sidebarCollapsed); });
   byId("rolloutReviewForm").addEventListener("input", markDirty);
   byId("rolloutReviewForm").addEventListener("change", markDirty);
-  byId("annotateOutcomeLabel").addEventListener("change", function () {
-    var record = selectedRollout();
-    var previous = record && record.annotation && record.annotation.outcome_label;
-    if (this.value && !previous && byId("annotateReviewStatus").value === "unreviewed") {
-      byId("annotateReviewStatus").value = "complete";
-    }
-  });
   byId("annotateF6Finger").addEventListener("change", renderAnnotateF6Curve); byId("annotatePlay").addEventListener("click", togglePlay); byId("annotateStepBack").addEventListener("click", function () { seekFrame(state.currentFrame - 1); }); byId("annotateStepForward").addEventListener("click", function () { seekFrame(state.currentFrame + 1); }); byId("annotateFrameSlider").addEventListener("input", function (event) { seekFrame(event.target.value); });
   byId("annotateVideo").addEventListener("play", function () { byId("annotatePlay").textContent = "Pause"; }); byId("annotateVideo").addEventListener("pause", function () { byId("annotatePlay").textContent = "Play"; }); byId("annotateVideo").addEventListener("timeupdate", function () { var record = selectedRollout(); if (record) updateFrameUi(Math.round(byId("annotateVideo").currentTime * (Number(record.fps) || 30)), false); });
   byId("addInterval").addEventListener("click", function () {
@@ -1239,13 +1230,54 @@ function bindEvents() {
   byId("refreshRuns").addEventListener("click", loadRuns); byId("refreshAnalysis").addEventListener("click", loadAnalysis); byId("settingsForm").addEventListener("submit", saveSettings); byId("refreshDiagnostics").addEventListener("click", loadDiagnostics);
   window.addEventListener("beforeunload", function (event) { flushTelemetry(); if (state.dirty) { event.preventDefault(); event.returnValue = ""; } });
   window.addEventListener("keydown", function (event) {
-    if (state.view !== "annotate" || isTypingTarget(event.target)) return;
-    if (event.key === " ") { event.preventDefault(); togglePlay(); return; } if (event.key === ",") { event.preventDefault(); navigateRollout(-1); return; } if (event.key === ".") { event.preventDefault(); navigateRollout(1); return; }
-    if (event.key === "ArrowLeft") { event.preventDefault(); seekFrame(state.currentFrame - 1); return; } if (event.key === "ArrowRight") { event.preventDefault(); seekFrame(state.currentFrame + 1); return; }
-    if (event.key.toLowerCase() === "s") { event.preventDefault(); saveIntervals(); return; }
-    if (event.key === "ArrowUp" && state.events.length) { event.preventDefault(); state.activeEvent = state.activeEvent == null ? 0 : Math.max(0,state.activeEvent-1); renderIntervals(); renderAnnotateTimeline(); return; }
-    if (event.key === "ArrowDown" && state.events.length) { event.preventDefault(); state.activeEvent = state.activeEvent == null ? 0 : Math.min(state.events.length-1,state.activeEvent+1); renderIntervals(); renderAnnotateTimeline(); return; }
-    if (["1","2","3","4"].indexOf(event.key) >= 0) { event.preventDefault(); setActiveEventType(Number(event.key)); return; } if (event.key.toLowerCase() === "q") { event.preventDefault(); setActiveBoundary("start"); return; } if (event.key.toLowerCase() === "w") { event.preventDefault(); setActiveBoundary("end"); }
+    if (state.view !== "annotate" || event.ctrlKey || event.altKey || event.metaKey) return;
+    var key = String(event.key || "");
+    var lower = key.toLowerCase();
+    // Search is available even when a video frame slider has focus.
+    if (key === "/" && !isTypingTarget(event.target)) {
+      event.preventDefault();
+      byId("annotateSearch").focus();
+      return;
+    }
+    if (isTypingTarget(event.target)) return;
+    if (event.code === "Space" || key === " ") {
+      event.preventDefault();
+      if (!event.repeat) togglePlay();
+    } else if (key === "ArrowLeft" || key === "ArrowRight") {
+      event.preventDefault();
+      var step = key === "ArrowLeft" ? -1 : 1;
+      seekFrame(state.currentFrame + step * (event.shiftKey ? 10 : 1));
+    } else if (key === "ArrowUp" || key === "ArrowDown") {
+      event.preventDefault();
+      if (!event.repeat && state.events.length) {
+        var direction = key === "ArrowUp" ? -1 : 1;
+        state.activeEvent = Math.max(0, Math.min(
+          state.events.length - 1,
+          (state.activeEvent == null ? 0 : state.activeEvent) + direction
+        ));
+        renderIntervals(); renderAnnotateTimeline();
+      }
+    } else if (/^[1-9]$/.test(key) && labelMeta(Number(key))) {
+      event.preventDefault();
+      if (!event.repeat) setActiveEventType(Number(key));
+    } else if (lower === "q" || lower === "w") {
+      event.preventDefault();
+      if (!event.repeat) setActiveBoundary(lower === "q" ? "start" : "end");
+    } else if (lower === "a") {
+      event.preventDefault();
+      if (!event.repeat) {
+        var current = state.activeEvent == null ? null : state.events[state.activeEvent];
+        var label = current && labelMeta(current.event_key) || state.labels[0];
+        if (label) addInterval(label.id);
+        else setAnnotationMessage("No registered interval labels.", "error");
+      }
+    } else if (lower === "s") {
+      event.preventDefault();
+      if (!event.repeat) saveIntervals();
+    } else if (key === "," || key === ".") {
+      event.preventDefault();
+      if (!event.repeat) navigateRollout(key === "," ? -1 : 1);
+    }
   });
 }
 async function init() {

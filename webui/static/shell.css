@@ -1816,3 +1816,8 @@ body.theme-dark .annotate-tactile-finger { background: var(--surface-raised); }
 .rollout-review-divider { display:flex; gap:8px; flex-wrap:wrap; align-items:baseline; border-bottom:1px solid var(--line-soft); padding:7px 0; margin-bottom:5px; font-size:.69rem; }
 .rollout-review-divider .muted { font-size:.61rem; }
 @media(max-width:650px) { .rollout-review-two { grid-template-columns:1fr; } }
+
+/* Compact expanded annotation keyboard reference. */
+.annotate-shortcut-details { margin: 3px 0 9px; }
+.annotate-shortcut-details summary { cursor: pointer; color: var(--muted); font-size: .64rem; font-weight: 650; }
+.annotate-shortcut-details .shortcut-grid { margin-top: 8px; }

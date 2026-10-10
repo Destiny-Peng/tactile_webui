@@ -221,10 +221,108 @@ class WorkspaceAnnotationTest(unittest.TestCase):
             "tactile_intervals": [],
         }))
         reviewed = app.rollout_payload()["rollouts"][0]
-        self.assertEqual(reviewed["annotation"]["outcome_label"], "recovered_success")
+        self.assertEqual(reviewed["annotation"]["outcome_label"], "success")
         self.assertEqual(reviewed["annotation_status"], "complete")
         self.assertEqual(reviewed["annotation"]["annotator"], "human")
         self.assertEqual(reviewed["ground_truth_outcome"], "failure")
+
+    def test_migrated_annotation_ground_truth_outcome_is_binary_source(self):
+        temporary, app = self.make_app()
+        self.addCleanup(temporary.cleanup)
+        target = app.annotation_record_path("usb_001")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        # This is the real migrated tactile sidecar shape. The manifest result
+        # is intentionally contradictory: only the sidecar outcome is trusted.
+        fixture = {
+            "schema_version": "tactile_intervals_v1",
+            "rollout_id": "usb_001",
+            "ground_truth_outcome": "success",
+            "outcome_provenance": {
+                "field": "ground_truth_outcome", "outcome_source": "filename"
+            },
+            "review_status": "complete",
+            "tactile_intervals": [],
+        }
+        target.write_text(json.dumps(fixture) + "\n")
+        before = target.read_bytes()
+        payload = app.rollout_payload()["rollouts"][0]
+        self.assertEqual(payload["ground_truth_outcome"], "failure")
+        self.assertEqual(payload["annotation"]["outcome_label"], "success")
+        self.assertEqual(payload["annotation_status"], "complete")
+        self.assertEqual(target.read_bytes(), before)
+
+        # Explicitly clearing an outcome must not resurrect the old result.
+        app.save_rollout_annotations("usb_001", [], review={
+            "outcome_label": None, "review_status": "complete", "annotator": "",
+        })
+        self.assertNotIn(
+            "outcome_label", app.rollout_payload()["rollouts"][0]["annotation"]
+        )
+        record = json.loads(target.read_text())
+        self.assertEqual(record["ground_truth_outcome"], "success")
+        self.assertEqual(record["outcome_provenance"], fixture["outcome_provenance"])
+        self.assertIsNone(record["outcome_label"])
+
+    def test_legacy_subtypes_normalize_without_modifying_source_files(self):
+        temporary, app = self.make_app()
+        self.addCleanup(temporary.cleanup)
+        target = app.annotation_record_path("usb_001")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        for raw, expected in (
+            ("success", "success"),
+            ("clean_success", "success"),
+            ("recovered_success", "success"),
+            ("failure", "failure"),
+            ("fail", "failure"),
+            ("terminal_failure", "failure"),
+            ("uncertain", None),
+            ("unknown", None),
+        ):
+            record = {
+                "rollout_id": "usb_001",
+                "ground_truth_outcome": raw,
+                "review_status": "complete",
+                "tactile_intervals": [],
+            }
+            target.write_text(json.dumps(record) + "\n")
+            before = target.read_bytes()
+            result = app.rollout_payload()["rollouts"][0]["annotation"]
+            self.assertEqual(result.get("outcome_label"), expected, raw)
+            self.assertEqual(target.read_bytes(), before)
+
+        # An actual post-migration human edit has priority over old fields.
+        target.write_text(json.dumps({
+            "rollout_id": "usb_001", "ground_truth_outcome": "success",
+            "outcome_label": "failure", "review_status": "complete",
+            "tactile_intervals": []
+        }) + "\n")
+        self.assertEqual(
+            app.rollout_payload()["rollouts"][0]["annotation"]["outcome_label"],
+            "failure",
+        )
+
+    def test_repository_migrated_annotation_samples_resolve(self):
+        sample_root = (
+            Path(__file__).resolve().parents[2]
+            / "annotations/failrecovery/records"
+        )
+        samples = sorted(sample_root.glob("*.tactile.json"))
+        if not samples:
+            self.skipTest("No committed migrated annotation samples")
+        success_sample = next(
+            (p for p in samples if "_usb_success_" in p.name), None
+        )
+        failure_sample = next(
+            (p for p in samples if "_mixedfail_" in p.name), None
+        )
+        for path, expected in ((success_sample, "success"), (failure_sample, "failure")):
+            if path is None:
+                continue
+            record = json.loads(path.read_text(encoding="utf-8"))
+            self.assertNotIn("outcome_label", record)
+            self.assertEqual(record["ground_truth_outcome"], expected)
+            parsed = TactileApplication._review_fields(record)
+            self.assertEqual(parsed.get("outcome_label"), expected)
 
     def test_manifest_outcome_is_not_inferred_when_review_only_has_intervals(self):
         temporary, app = self.make_app()
@@ -238,15 +336,19 @@ class WorkspaceAnnotationTest(unittest.TestCase):
         self.assertNotIn("outcome_label", row["annotation"])
         self.assertEqual(len(row["annotation_events"]), 1)
 
-    def test_outcome_filter_has_unlabeled_distinct_from_uncertain(self):
+    def test_binary_outcome_filter_has_unlabeled(self):
         static = Path(__file__).resolve().parents[1] / "static"
         js = (static / "shell.js").read_text(encoding="utf-8")
         html = (static / "index.html").read_text(encoding="utf-8")
         self.assertNotIn("record.ground_truth_outcome", js)
         self.assertNotIn("Source manifest outcome:", js)
-        self.assertIn('return ["success", "failure", "recovered_success", "uncertain"]', js)
+        self.assertIn('outcome === "success" || outcome === "failure"', js)
         self.assertIn('"unlabeled"', js)
         self.assertIn('<option value="">Unlabeled</option>', html)
+        self.assertIn('<option value="success">Success</option>', html)
+        self.assertNotIn('Recovered Success', html)
+        self.assertNotIn('Clean Success', html)
+        self.assertNotIn('<option value="uncertain">', html)
 
     def test_full_rollout_review_is_separate_from_interval_labels(self):
         temporary, app = self.make_app()
@@ -258,7 +360,7 @@ class WorkspaceAnnotationTest(unittest.TestCase):
             [{"event_key": 1, "start_frame": 4, "end_frame": 10},
              {"event_key": 2, "start_frame": 20, "end_frame": 30}],
             review={
-                "outcome_label": "recovered_success",
+                "outcome_label": "success",
                 "review_status": "complete",
                 "annotator": "reviewer_A",
                 "confidence": 0.9,
@@ -267,7 +369,7 @@ class WorkspaceAnnotationTest(unittest.TestCase):
         )
         self.assertEqual(len(saved), 2)
         sidecar = json.loads(app.annotation_record_path("usb_001").read_text())
-        self.assertEqual(sidecar["outcome_label"], "recovered_success")
+        self.assertEqual(sidecar["outcome_label"], "success")
         self.assertEqual(sidecar["review_status"], "complete")
         self.assertEqual(sidecar["annotator"], "reviewer_A")
         self.assertEqual(sidecar["confidence"], 0.9)
@@ -276,14 +378,14 @@ class WorkspaceAnnotationTest(unittest.TestCase):
         self.assertEqual(original_manifest, source_manifest.read_bytes())
         row = app.rollout_payload()["rollouts"][0]
         self.assertEqual(row["ground_truth_outcome"], "failure")
-        self.assertEqual(row["annotation"]["outcome_label"], "recovered_success")
+        self.assertEqual(row["annotation"]["outcome_label"], "success")
         self.assertEqual(row["annotation_status"], "complete")
         self.assertEqual([x["event_key"] for x in row["annotation_events"]], [1, 2])
 
         # An old interval-only client must preserve the new review metadata.
         app.save_rollout_annotations("usb_001", saved)
         updated = app.rollout_payload()["rollouts"][0]
-        self.assertEqual(updated["annotation"]["outcome_label"], "recovered_success")
+        self.assertEqual(updated["annotation"]["outcome_label"], "success")
         self.assertEqual(updated["annotation"]["annotator"], "reviewer_A")
 
     def test_review_edit_preserves_legacy_confidence_without_requiring_it(self):
@@ -321,10 +423,10 @@ class WorkspaceAnnotationTest(unittest.TestCase):
             "success",
         )
 
-    def test_reviewer_can_set_uncertain_without_relabeling_source(self):
+    def test_reviewer_can_set_binary_outcome_without_relabeling_source(self):
         temporary, app = self.make_app()
         self.addCleanup(temporary.cleanup)
-        for outcome in ("failure", "success", "recovered_success", "uncertain"):
+        for outcome in ("failure", "success"):
             app.save_rollout_annotations("usb_001", [], review={
                 "outcome_label": outcome, "review_status": "in_progress",
                 "annotator": "human_1",
@@ -347,6 +449,9 @@ class WorkspaceAnnotationTest(unittest.TestCase):
             {"outcome_label": "failure", "annotator": ""},
             {"outcome_label": "success", "annotator": "someone", "confidence": 1.4},
             {"outcome_label": "something_else", "annotator": "someone"},
+            {"outcome_label": "clean_success", "annotator": "someone"},
+            {"outcome_label": "recovered_success", "annotator": "someone"},
+            {"outcome_label": "uncertain", "annotator": "someone"},
             {"outcome_label": "success", "annotator": "someone", "review_status": "bogus"},
         )
         for review in cases:

@@ -189,6 +189,65 @@ class WorkspaceAnnotationTest(unittest.TestCase):
         self.assertEqual(app.data_root, external.resolve())
         self.assertTrue(app.tactile.has_rollout("usb_symlink_path_only"))
 
+    def test_manifest_outcome_and_embedded_annotation_are_not_review_ground_truth(self):
+        temporary, app = self.make_app()
+        self.addCleanup(temporary.cleanup)
+        # The source catalog can carry an inferred outcome or legacy annotation.
+        # Neither may label a rollout after the review migration.
+        manifest = app.manifest_path
+        row = json.loads(manifest.read_text())
+        row["ground_truth_outcome"] = "failure"
+        row["annotation"] = {
+            "outcome_label": "success",
+            "review_status": "complete",
+            "annotator": "manifest_import",
+        }
+        manifest.write_text(json.dumps(row) + "\n")
+        app = TactileApplication(app.root)
+        payload = app.rollout_payload()["rollouts"][0]
+        self.assertEqual(payload["ground_truth_outcome"], "failure")
+        self.assertNotIn("outcome_label", payload["annotation"])
+        self.assertEqual(payload["annotation_status"], "unreviewed")
+
+        # The migrated sidecar is the only authoritative source, including
+        # for rollout outcomes that contradict the old manifest.
+        target = app.annotation_record_path("usb_001")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps({
+            "rollout_id": "usb_001",
+            "outcome_label": "recovered_success",
+            "annotator": "human",
+            "review_status": "complete",
+            "tactile_intervals": [],
+        }))
+        reviewed = app.rollout_payload()["rollouts"][0]
+        self.assertEqual(reviewed["annotation"]["outcome_label"], "recovered_success")
+        self.assertEqual(reviewed["annotation_status"], "complete")
+        self.assertEqual(reviewed["annotation"]["annotator"], "human")
+        self.assertEqual(reviewed["ground_truth_outcome"], "failure")
+
+    def test_manifest_outcome_is_not_inferred_when_review_only_has_intervals(self):
+        temporary, app = self.make_app()
+        self.addCleanup(temporary.cleanup)
+        app.save_rollout_annotations(
+            "usb_001", [{"event_key": 1, "start_frame": 5, "end_frame": 8}]
+        )
+        row = app.rollout_payload()["rollouts"][0]
+        self.assertEqual(row["ground_truth_outcome"], "failure")
+        self.assertEqual(row["annotation_status"], "complete")
+        self.assertNotIn("outcome_label", row["annotation"])
+        self.assertEqual(len(row["annotation_events"]), 1)
+
+    def test_outcome_filter_has_unlabeled_distinct_from_uncertain(self):
+        static = Path(__file__).resolve().parents[1] / "static"
+        js = (static / "shell.js").read_text(encoding="utf-8")
+        html = (static / "index.html").read_text(encoding="utf-8")
+        self.assertNotIn("record.ground_truth_outcome", js)
+        self.assertNotIn("Source manifest outcome:", js)
+        self.assertIn('return ["success", "failure", "recovered_success", "uncertain"]', js)
+        self.assertIn('"unlabeled"', js)
+        self.assertIn('<option value="">Unlabeled</option>', html)
+
     def test_full_rollout_review_is_separate_from_interval_labels(self):
         temporary, app = self.make_app()
         self.addCleanup(temporary.cleanup)

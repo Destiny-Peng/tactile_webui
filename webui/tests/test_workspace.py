@@ -288,7 +288,7 @@ class WorkspaceAnnotationTest(unittest.TestCase):
             "rollout_id": "usb_001", "event_key": 2,
             "event_index": 0, "start_frame": 1, "end_frame": 3
         }
-        seed.write_text(json.dumps(item) + "\\n")
+        seed.write_text(json.dumps(item) + "\n")
         self.assertEqual(len(app.annotations_by_rollout()["usb_001"]), 1)
         app.save_rollout_annotations("usb_001", [], review={
             "outcome_label": "success", "review_status": "complete",

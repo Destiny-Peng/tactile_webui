@@ -189,6 +189,126 @@ class WorkspaceAnnotationTest(unittest.TestCase):
         self.assertEqual(app.data_root, external.resolve())
         self.assertTrue(app.tactile.has_rollout("usb_symlink_path_only"))
 
+    def test_full_rollout_review_is_separate_from_interval_labels(self):
+        temporary, app = self.make_app()
+        self.addCleanup(temporary.cleanup)
+        source_manifest = app.manifest_path
+        original_manifest = source_manifest.read_bytes()
+        saved = app.save_rollout_annotations(
+            "usb_001",
+            [{"event_key": 1, "start_frame": 4, "end_frame": 10},
+             {"event_key": 2, "start_frame": 20, "end_frame": 30}],
+            review={
+                "outcome_label": "recovered_success",
+                "review_status": "complete",
+                "annotator": "reviewer_A",
+                "confidence": 0.9,
+                "notes": "Failed on first attempt, later recovered.",
+            },
+        )
+        self.assertEqual(len(saved), 2)
+        sidecar = json.loads(app.annotation_record_path("usb_001").read_text())
+        self.assertEqual(sidecar["outcome_label"], "recovered_success")
+        self.assertEqual(sidecar["review_status"], "complete")
+        self.assertEqual(sidecar["annotator"], "reviewer_A")
+        self.assertEqual(sidecar["confidence"], 0.9)
+        self.assertEqual(sidecar["notes"], "Failed on first attempt, later recovered.")
+        self.assertEqual([row["event_key"] for row in sidecar["tactile_intervals"]], [1, 2])
+        self.assertEqual(original_manifest, source_manifest.read_bytes())
+        row = app.rollout_payload()["rollouts"][0]
+        self.assertEqual(row["ground_truth_outcome"], "failure")
+        self.assertEqual(row["annotation"]["outcome_label"], "recovered_success")
+        self.assertEqual(row["annotation_status"], "complete")
+        self.assertEqual([x["event_key"] for x in row["annotation_events"]], [1, 2])
+
+        # An old interval-only client must preserve the new review metadata.
+        app.save_rollout_annotations("usb_001", saved)
+        updated = app.rollout_payload()["rollouts"][0]
+        self.assertEqual(updated["annotation"]["outcome_label"], "recovered_success")
+        self.assertEqual(updated["annotation"]["annotator"], "reviewer_A")
+
+    def test_review_without_intervals_can_be_complete(self):
+        temporary, app = self.make_app()
+        self.addCleanup(temporary.cleanup)
+        app.save_rollout_annotations("usb_001", [], review={
+            "outcome_label": "success", "review_status": "complete",
+            "annotator": "reviewer_B", "confidence": None, "notes": "",
+        })
+        row = app.rollout_payload()["rollouts"][0]
+        self.assertEqual(row["annotation_events"], [])
+        self.assertEqual(row["annotation_status"], "complete")
+        self.assertEqual(row["annotation"]["outcome_label"], "success")
+        self.assertEqual(row["ground_truth_outcome"], "failure")
+        # The new annotation survives a complete application restart.
+        reopened = TactileApplication(app.root)
+        self.assertEqual(
+            reopened.rollout_payload()["rollouts"][0]["annotation"]["outcome_label"],
+            "success",
+        )
+
+    def test_reviewer_can_set_uncertain_without_relabeling_source(self):
+        temporary, app = self.make_app()
+        self.addCleanup(temporary.cleanup)
+        for outcome in ("failure", "success", "recovered_success", "uncertain"):
+            app.save_rollout_annotations("usb_001", [], review={
+                "outcome_label": outcome, "review_status": "in_progress",
+                "annotator": "human_1",
+            })
+            actual = app.rollout_payload()["rollouts"][0]
+            self.assertEqual(actual["annotation"]["outcome_label"], outcome)
+            self.assertEqual(actual["annotation_status"], "in_progress")
+            self.assertEqual(actual["ground_truth_outcome"], "failure")
+        app.save_rollout_annotations("usb_001", [], review={
+            "outcome_label": None, "review_status": "unreviewed", "annotator": "",
+        })
+        actual = app.rollout_payload()["rollouts"][0]
+        self.assertNotIn("outcome_label", actual["annotation"])
+        self.assertEqual(actual["annotation_status"], "unreviewed")
+
+    def test_invalid_review_is_rejected_without_writing(self):
+        temporary, app = self.make_app()
+        self.addCleanup(temporary.cleanup)
+        cases = (
+            {"outcome_label": "failure", "annotator": ""},
+            {"outcome_label": "success", "annotator": "someone", "confidence": 1.4},
+            {"outcome_label": "something_else", "annotator": "someone"},
+            {"outcome_label": "success", "annotator": "someone", "review_status": "bogus"},
+        )
+        for review in cases:
+            with self.assertRaises(ValueError):
+                app.save_rollout_annotations("usb_001", [], review=review)
+        self.assertFalse(app.annotation_record_path("usb_001").exists())
+
+    def test_deleted_intervals_do_not_reappear_from_historical_seed(self):
+        temporary, app = self.make_app()
+        self.addCleanup(temporary.cleanup)
+        seed = app.root / "outputs/usb_event_intervals/sample/intervals.jsonl"
+        seed.parent.mkdir(parents=True)
+        item = {
+            "rollout_id": "usb_001", "event_key": 2,
+            "event_index": 0, "start_frame": 1, "end_frame": 3
+        }
+        seed.write_text(json.dumps(item) + "\\n")
+        self.assertEqual(len(app.annotations_by_rollout()["usb_001"]), 1)
+        app.save_rollout_annotations("usb_001", [], review={
+            "outcome_label": "success", "review_status": "complete",
+            "annotator": "reviewer_A",
+        })
+        self.assertEqual(app.annotations_by_rollout().get("usb_001", []), [])
+        self.assertEqual(app.rollout_payload()["rollouts"][0]["annotation_status"], "complete")
+
+    def test_annotate_html_contains_rollout_review_controls(self):
+        static = Path(__file__).resolve().parents[1] / "static"
+        html = (static / "index.html").read_text(encoding="utf-8")
+        js = (static / "shell.js").read_text(encoding="utf-8")
+        for ident in ("annotateOutcomeLabel", "annotateReviewer",
+                      "annotateReviewStatus", "annotateConfidence",
+                      "annotateReviewNotes", "annotateSourceOutcome"):
+            self.assertIn(f'id="{ident}"', html)
+            self.assertIn(f'byId("{ident}")', js)
+        self.assertIn("loadRolloutReviewForm(record)", js)
+        self.assertIn("rolloutReviewPayload()", js)
+
     def test_results_annotation_filter_is_dynamic(self):
         static = Path(__file__).resolve().parents[1] / "static"
         html = (static / "index.html").read_text(encoding="utf-8")

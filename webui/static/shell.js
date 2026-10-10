@@ -180,20 +180,16 @@ function populateTaskFilter() {
   select.value = tasks.indexOf(current) >= 0 ? current : "all";
 }
 function rolloutOutcome(record) {
-  // Only a reviewed annotation is an outcome. Missing is NOT uncertain
-  // and must not inherit the manifest's historical/inferred result.
+  // Binary outcomes are normalized server-side from migrated annotation files.
+  // Missing labels never fall back to manifest/filename inference.
   var outcome = record && record.annotation && record.annotation.outcome_label;
-  return ["success", "failure", "recovered_success", "uncertain"].indexOf(outcome) >= 0
-    ? outcome : "unlabeled";
+  return outcome === "success" || outcome === "failure" ? outcome : "unlabeled";
 }
 function populateOutcomeFilter() {
   var select = byId("annotateOutcomeFilter");
   var previous = select.value || "all";
-  var expected = ["success", "failure", "recovered_success", "uncertain", "unlabeled"];
-  var extra = Array.from(new Set(state.rollouts.map(rolloutOutcome))).filter(function (outcome) {
-    return expected.indexOf(outcome) < 0;
-  }).sort();
-  var outcomes = expected.concat(extra);
+  var expected = ["success", "failure", "unlabeled"];
+  var outcomes = expected;
   select.innerHTML = '<option value="all">All outcomes</option>' + outcomes.map(function (outcome) {
     var label = outcome.replace(/_/g, " ").replace(/\b\w/g, function (match) { return match.toUpperCase(); });
     return '<option value="' + escapeHtml(outcome) + '">' + escapeHtml(label) + '</option>';

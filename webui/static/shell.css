@@ -1803,3 +1803,16 @@ body.theme-dark .annotate-tactile-finger { background: var(--surface-raised); }
   .review-workspace .queue-panel > .panel-heading { padding-right: 0; }
   .video-frame-status { margin-left: 0; }
 }
+
+/* LF3R-compatible rollout outcome review, distinct from tactile action intervals. */
+.rollout-review-form { display:grid; gap:9px; padding:10px; margin:10px 0; border:1px solid var(--line-soft); border-radius:9px; background:var(--surface-raised); }
+.rollout-review-form > .eyebrow { margin:0; }
+.rollout-review-field { display:flex; flex-direction:column; gap:4px; min-width:0; }
+.rollout-review-field > span { font-size:.64rem; font-weight:650; color:var(--muted); }
+.rollout-review-field select, .rollout-review-field input, .rollout-review-field textarea { min-width:0; width:100%; min-height:32px; padding:6px 8px; border:1px solid var(--line); border-radius:7px; background:var(--control); color:var(--text); font-size:.72rem; }
+.rollout-review-field textarea { resize:vertical; }
+.rollout-review-two { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:8px; }
+.rollout-review-source { font-size:.61rem; line-height:1.45; margin:0; overflow-wrap:anywhere; }
+.rollout-review-divider { display:flex; gap:8px; flex-wrap:wrap; align-items:baseline; border-bottom:1px solid var(--line-soft); padding:7px 0; margin-bottom:5px; font-size:.69rem; }
+.rollout-review-divider .muted { font-size:.61rem; }
+@media(max-width:650px) { .rollout-review-two { grid-template-columns:1fr; } }
